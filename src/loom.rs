@@ -6,7 +6,18 @@ mod inner {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
-    pub(crate) use loom::{cell::UnsafeCell, hint, model, sync, thread};
+    pub(crate) use loom::{cell::UnsafeCell, hint, sync, thread};
+
+    pub(crate) fn model(f: impl Fn() + Sync + Send + 'static) {
+        let iteration = core::sync::atomic::AtomicUsize::new(0);
+        loom::model(move || {
+            println!(
+                "\n---- iteration {} ----\n",
+                iteration.fetch_add(1, atomic::Ordering::Relaxed)
+            );
+            f();
+        })
+    }
 
     pub(crate) mod alloc {
         #![allow(dead_code)]

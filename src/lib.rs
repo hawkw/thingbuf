@@ -132,6 +132,7 @@ impl<T> ThingBuf<T> {
     pub fn push_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Result<U, AtCapacity> {
         self.push_ref().map(|mut r| r.with_mut(f))
     }
+
     pub fn push_ref(&self) -> Result<Ref<'_, T>, AtCapacity> {
         let mut backoff = Backoff::new();
         let mut tail = self.tail.load(Ordering::Relaxed);
@@ -190,15 +191,17 @@ impl<T> ThingBuf<T> {
         let mut head = self.head.load(Ordering::Relaxed);
 
         loop {
+            test_dbg!(head);
             let (idx, gen) = self.idx_gen(head);
             test_dbg!(idx);
             test_dbg!(gen);
             let slot = &self.slots[idx];
             let state = slot.state.load(Ordering::Acquire);
+            test_dbg!(state);
 
             // If the slot's state is ahead of the head index by one, we can pop
             // it.
-            if state == head + 1 {
+            if test_dbg!(state == head + 1) {
                 let next_head = self.next(idx, gen);
                 match self.head.compare_exchange(
                     head,
@@ -220,10 +223,9 @@ impl<T> ThingBuf<T> {
                 }
             }
 
-            if state == head {
-                let tail = self.tail.load(Ordering::Acquire);
+            if test_dbg!(state == head) {
 
-                if tail == head {
+                if test_dbg!(tail == head) {
                     return None;
                 }
 
@@ -272,7 +274,10 @@ impl<T> Ref<'_, T> {
 impl<T> Drop for Ref<'_, T> {
     #[inline]
     fn drop(&mut self) {
-        self.slot.state.store(self.new_state, Ordering::Release);
+        test_println!("drop_ref");
+        self.slot
+            .state
+            .store(test_dbg!(self.new_state), Ordering::Release);
     }
 }
 
