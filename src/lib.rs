@@ -1,4 +1,10 @@
-use core::ops::{Deref, DerefMut};
+use core::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
 macro_rules! test_println {
     ($($arg:tt)*) => {
@@ -36,6 +42,9 @@ use crate::loom::{
     atomic::{AtomicUsize, Ordering},
     UnsafeCell,
 };
+
+#[cfg(feature = "alloc")]
+mod stringbuf;
 
 pub struct ThingBuf<T> {
     head: CachePadded<AtomicUsize>,
@@ -223,6 +232,14 @@ impl<T> ThingBuf<T> {
     }
 }
 
+impl<T> fmt::Debug for ThingBuf<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ThingBuf")
+            .field("capacity", &self.capacity())
+            .finish()
+    }
+}
+
 // === impl Ref ===
 
 impl<T> Ref<'_, T> {
@@ -250,28 +267,34 @@ impl<T> Drop for Ref<'_, T> {
     }
 }
 
-// impl<T> Deref for Writing<'_, T> {
-//     type Target = T;
+impl<T: fmt::Debug> fmt::Debug for Ref<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.with(|val| fmt::Debug::fmt(val, f))
+    }
+}
 
-//     #[inline]
-//     fn deref(&self) -> &T {
-//         unsafe {
-//             // Safety: if a `Writing` exists, it must exclusively own the
-//             // slot it points at.
-//             self.slot.value.with()
-//         }
-//     }
-// }
+impl<T: fmt::Display> fmt::Display for Ref<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.with(|val| fmt::Display::fmt(val, f))
+    }
+}
 
-// impl<T> DerefMut for Writing<'_, T> {
-//     fn deref_mut(&mut self) -> &mut T {
-//         unsafe {
-//             // Safety: if a `Writing` exists, it must exclusively own the
-//             // slot it points at.
-//             self.slot.value.get_mut()
-//         }
-//     }
-// }
+impl<T: fmt::Write> fmt::Write for Ref<'_, T> {
+    #[inline]
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.with_mut(|val| val.write_str(s))
+    }
+
+    #[inline]
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        self.with_mut(|val| val.write_char(c))
+    }
+
+    #[inline]
+    fn write_fmt(&mut self, f: fmt::Arguments<'_>) -> fmt::Result {
+        self.with_mut(|val| val.write_fmt(f))
+    }
+}
 
 // === impl Backoff ===
 

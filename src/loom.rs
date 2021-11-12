@@ -64,7 +64,7 @@ mod inner {
     pub(crate) use core::sync::atomic;
 
     #[cfg(feature = "std")]
-    use std::{sync, thread};
+    pub use std::thread;
 
     pub(crate) mod hint {
         #[inline(always)]
