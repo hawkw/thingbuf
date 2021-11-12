@@ -199,7 +199,7 @@ impl<T> ThingBuf<T> {
                 ) {
                     Ok(_) => {
                         return Some(Ref {
-                            new_state: head + 1,
+                            new_state: head.wrapping_add(self.gen),
                             slot,
                         })
                     }
