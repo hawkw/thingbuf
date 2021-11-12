@@ -128,6 +128,10 @@ impl<T> ThingBuf<T> {
         }
     }
 
+    #[inline]
+    pub fn push_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Result<U, AtCapacity> {
+        self.push_ref().map(|mut r| r.with_mut(f))
+    }
     pub fn push_ref(&self) -> Result<Ref<'_, T>, AtCapacity> {
         let mut backoff = Backoff::new();
         let mut tail = self.tail.load(Ordering::Relaxed);
@@ -174,6 +178,11 @@ impl<T> ThingBuf<T> {
 
             tail = self.tail.load(Ordering::Relaxed)
         }
+    }
+
+    #[inline]
+    pub fn pop_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
+        self.pop_ref().map(|mut r| r.with_mut(f))
     }
 
     pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
@@ -244,7 +253,7 @@ impl<T> fmt::Debug for ThingBuf<T> {
 
 impl<T> Ref<'_, T> {
     #[inline]
-    pub fn with<U>(&self, f: impl Fn(&T) -> U) -> U {
+    pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
         self.slot.value.with(|value| unsafe {
             // Safety: if a `Ref` exists, we have exclusive ownership of the slot.
             f(&*value)
@@ -252,7 +261,7 @@ impl<T> Ref<'_, T> {
     }
 
     #[inline]
-    pub fn with_mut<U>(&mut self, f: impl Fn(&mut T) -> U) -> U {
+    pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
         self.slot.value.with_mut(|value| unsafe {
             // Safety: if a `Ref` exists, we have exclusive ownership of the slot.
             f(&mut *value)
