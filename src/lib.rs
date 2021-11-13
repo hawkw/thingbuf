@@ -45,6 +45,14 @@ use crate::util::{Backoff, CachePadded};
 #[cfg(feature = "alloc")]
 mod stringbuf;
 
+#[cfg(feature = "alloc")]
+pub use stringbuf::StringBuf;
+
+/// A ringbuf of...things.
+///
+/// # Examples
+///
+/// Using a
 pub struct ThingBuf<T, S = Box<[Slot<T>]>> {
     head: CachePadded<AtomicUsize>,
     tail: CachePadded<AtomicUsize>,
@@ -267,7 +275,7 @@ where
     }
 }
 
-impl<T> fmt::Debug for ThingBuf<T> {
+impl<T, S> fmt::Debug for ThingBuf<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ThingBuf")
             .field("capacity", &self.capacity())
@@ -344,6 +352,16 @@ impl<T: Default> Default for Slot<T> {
 
 impl<T> Slot<T> {
     const UNINIT: usize = usize::MAX;
+
+    #[cfg(not(test))]
+    pub const fn new(t: T) -> Self {
+        Self {
+            value: UnsafeCell::new(t),
+            state: AtomicUsize::new(Self::UNINIT),
+        }
+    }
+
+    #[cfg(test)]
     pub fn new(t: T) -> Self {
         Self {
             value: UnsafeCell::new(t),
@@ -353,7 +371,15 @@ impl<T> Slot<T> {
 }
 
 impl<T> Slot<MaybeUninit<T>> {
+    #[cfg(not(test))]
+    pub const fn uninit() -> Self {
+        Self::new(MaybeUninit::uninit())
+    }
+
+    #[cfg(test)]
     pub fn uninit() -> Self {
         Self::new(MaybeUninit::uninit())
     }
 }
+
+unsafe impl<T: Sync> Sync for Slot<T> {}

@@ -90,7 +90,7 @@ mod inner {
     pub(crate) struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
 
     impl<T> UnsafeCell<T> {
-        pub fn new(data: T) -> UnsafeCell<T> {
+        pub const fn new(data: T) -> UnsafeCell<T> {
             UnsafeCell(core::cell::UnsafeCell::new(data))
         }
 

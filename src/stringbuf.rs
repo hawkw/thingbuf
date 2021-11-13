@@ -3,8 +3,8 @@ use super::*;
 use alloc::string::String;
 
 #[derive(Debug)]
-pub struct StringBuf {
-    inner: ThingBuf<String>,
+pub struct StringBuf<S = Box<[Slot<String>]>> {
+    inner: ThingBuf<String, S>,
     max_idle_capacity: usize,
 }
 
@@ -15,7 +15,18 @@ impl StringBuf {
             max_idle_capacity: usize::MAX,
         }
     }
+}
 
+impl<S> StringBuf<S>
+where
+    S: AsRef<[Slot<String>]>,
+{
+    pub fn from_array(array: S) -> Self {
+        Self {
+            inner: ThingBuf::from_array(array),
+            max_idle_capacity: usize::MAX,
+        }
+    }
     pub fn with_max_idle_capacity(self, max_idle_capacity: usize) -> Self {
         Self {
             max_idle_capacity,
