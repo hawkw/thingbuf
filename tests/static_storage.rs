@@ -3,16 +3,7 @@ use thingbuf::{Slot, StringBuf, ThingBuf};
 
 #[test]
 fn static_storage_thingbuf() {
-    let thingbuf = Arc::new(ThingBuf::from_array([
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-    ]));
+    let thingbuf = Arc::new(ThingBuf::<i32, [Slot<i32>; 16]>::new_static());
 
     let producer = {
         let thingbuf = thingbuf.clone();
@@ -56,16 +47,7 @@ fn static_storage_thingbuf() {
 
 #[test]
 fn static_storage_stringbuf() {
-    let stringbuf = Arc::new(StringBuf::from_array([
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-    ]));
+    let stringbuf = Arc::new(StringBuf::<[Slot<String>; 8]>::new_static());
 
     let producer = {
         let stringbuf = stringbuf.clone();
@@ -101,7 +83,7 @@ fn static_storage_stringbuf() {
         writeln!(results, "{}", string).unwrap();
     }
 
-    let results = dbg!(results);
+    println!("results:\n{}", results);
 
     for (n, ln) in results.lines().enumerate() {
         assert_eq!(ln.parse::<usize>(), Ok(n));

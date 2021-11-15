@@ -17,6 +17,32 @@ impl StringBuf {
     }
 }
 
+#[cfg(not(test))]
+impl<const CAPACITY: usize> StringBuf<[Slot<String>; CAPACITY]> {
+    pub const fn new_static() -> Self {
+        Self {
+            inner: ThingBuf::new_static(),
+            max_idle_capacity: usize::MAX,
+        }
+    }
+
+    pub const fn new_static_with_max_idle_capacity(max_idle_capacity: usize) -> Self {
+        Self {
+            inner: ThingBuf::new_static(),
+            max_idle_capacity,
+        }
+    }
+}
+
+impl<S> StringBuf<S> {
+    pub fn with_max_idle_capacity(self, max_idle_capacity: usize) -> Self {
+        Self {
+            max_idle_capacity,
+            inner: self.inner,
+        }
+    }
+}
+
 impl<S> StringBuf<S>
 where
     S: AsArray<String>,
@@ -25,12 +51,6 @@ where
         Self {
             inner: ThingBuf::from_array(array),
             max_idle_capacity: usize::MAX,
-        }
-    }
-    pub fn with_max_idle_capacity(self, max_idle_capacity: usize) -> Self {
-        Self {
-            max_idle_capacity,
-            ..self
         }
     }
 

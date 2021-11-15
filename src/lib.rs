@@ -77,7 +77,7 @@ pub struct Ref<'slot, T> {
 pub struct AtCapacity(usize);
 
 pub struct Slot<T> {
-    value: UnsafeCell<T>,
+    value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicUsize,
 }
 
@@ -85,19 +85,8 @@ pub struct Slot<T> {
 
 impl<T: Default> ThingBuf<T> {
     pub fn new(capacity: usize) -> Self {
-        Self::new_with(capacity, T::default)
-    }
-}
-
-impl<T> ThingBuf<T> {
-    pub fn new_with(capacity: usize, mut initializer: impl FnMut() -> T) -> Self {
         assert!(capacity > 0);
-        let slots = (0..capacity)
-            .map(|idx| Slot {
-                state: AtomicUsize::new(idx),
-                value: UnsafeCell::new(initializer()),
-            })
-            .collect();
+        let slots = (0..capacity).map(|_| Slot::empty()).collect();
         let gen = (capacity + 1).next_power_of_two();
         let idx_mask = gen - 1;
         let gen_mask = !(gen - 1);
@@ -109,6 +98,27 @@ impl<T> ThingBuf<T> {
             idx_mask,
             capacity,
             slots,
+            _t: PhantomData,
+        }
+    }
+}
+
+#[cfg(not(test))]
+impl<T, const CAPACITY: usize> ThingBuf<T, [Slot<T>; CAPACITY]> {
+    const SLOT: Slot<T> = Slot::empty();
+
+    pub const fn new_static() -> Self {
+        let gen = (CAPACITY + 1).next_power_of_two();
+        let idx_mask = gen - 1;
+        let gen_mask = !(gen - 1);
+        Self {
+            head: CachePadded(AtomicUsize::new(0)),
+            tail: CachePadded(AtomicUsize::new(0)),
+            gen,
+            gen_mask,
+            idx_mask,
+            capacity: CAPACITY,
+            slots: [Self::SLOT; CAPACITY],
             _t: PhantomData,
         }
     }
@@ -139,17 +149,17 @@ impl<T, S> ThingBuf<T, S> {
     }
 }
 
-impl<T, S> ThingBuf<T, S>
+impl<T: Default, S> ThingBuf<T, S>
 where
     S: AsArray<T>,
 {
     pub fn from_array(slots: S) -> Self {
         let capacity = slots.len();
         assert!(capacity > 0);
-        for (idx, slot) in slots.as_array().iter().enumerate() {
-            // Relaxed is fine here, because the slot is not shared yet.
-            slot.state.store(idx, Ordering::Relaxed);
-        }
+        // for (idx, slot) in slots.as_array().iter().enumerate() {
+        //     // Relaxed is fine here, because the slot is not shared yet.
+        //     slot.state.store(idx, Ordering::Relaxed);
+        // }
         let gen = (capacity + 1).next_power_of_two();
         let idx_mask = gen - 1;
         let gen_mask = !(gen - 1);
@@ -171,6 +181,7 @@ where
     }
 
     pub fn push_ref(&self) -> Result<Ref<'_, T>, AtCapacity> {
+        test_println!("push_ref");
         let mut backoff = Backoff::new();
         let mut tail = self.tail.load(Ordering::Relaxed);
         let slots = self.slots.as_array();
@@ -182,7 +193,7 @@ where
             let slot = &slots[idx];
             let state = slot.state.load(Ordering::Acquire);
 
-            if state == tail {
+            if state == tail || (state == 0 && gen == 0) {
                 // Move the tail index forward by 1.
                 let next_tail = self.next(idx, gen);
                 match self.tail.compare_exchange_weak(
@@ -192,12 +203,25 @@ where
                     Ordering::Relaxed,
                 ) {
                     Ok(_) => {
+                        // We got the slot! It's now okay to write to it
+                        test_println!("claimed tail slot");
+                        if gen == 0 {
+                            slot.value.with_mut(|value| unsafe {
+                                // Safety: we have just claimed exclusive ownership over
+                                // this slot.
+                                (*value).write(T::default());
+                            });
+                            test_println!("-> initialized");
+                        }
+
                         return Ok(Ref {
                             new_state: tail + 1,
                             slot,
-                        })
+                        });
                     }
                     Err(actual) => {
+                        // Someone else took this slot and advanced the tail
+                        // index. Try to claim the new tail.
                         tail = actual;
                         backoff.spin();
                         continue;
@@ -225,6 +249,7 @@ where
     }
 
     pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
+        test_println!("pop_ref");
         let mut backoff = Backoff::new();
         let mut head = self.head.load(Ordering::Relaxed);
         let slots = self.slots.as_array();
@@ -249,10 +274,11 @@ where
                     Ordering::Relaxed,
                 ) {
                     Ok(_) => {
+                        test_println!("claimed head slot");
                         return Some(Ref {
                             new_state: head.wrapping_add(self.gen),
                             slot,
-                        })
+                        });
                     }
                     Err(actual) => {
                         head = actual;
@@ -277,9 +303,28 @@ where
             head = self.head.load(Ordering::Relaxed);
         }
     }
+
+    pub fn len(&self) -> usize {
+        use std::cmp;
+        loop {
+            let tail = self.tail.load(Ordering::SeqCst);
+            let head = self.head.load(Ordering::SeqCst);
+
+            if self.tail.load(Ordering::SeqCst) == tail {
+                let (head_idx, _) = self.idx_gen(head);
+                let (tail_idx, _) = self.idx_gen(tail);
+                return match head_idx.cmp(&tail_idx) {
+                    cmp::Ordering::Less => head_idx - tail_idx,
+                    cmp::Ordering::Greater => self.capacity - head_idx + tail_idx,
+                    _ if tail == head => 0,
+                    _ => self.capacity,
+                };
+            }
+        }
+    }
 }
 
-impl<T, S> fmt::Debug for ThingBuf<T, S> {
+impl<T: Default, S> fmt::Debug for ThingBuf<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ThingBuf")
             .field("capacity", &self.capacity())
@@ -293,16 +338,23 @@ impl<T> Ref<'_, T> {
     #[inline]
     pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
         self.slot.value.with(|value| unsafe {
-            // Safety: if a `Ref` exists, we have exclusive ownership of the slot.
-            f(&*value)
+            // Safety: if a `Ref` exists, we have exclusive ownership of the
+            // slot. A `Ref` is only created if the slot has already been
+            // initialized.
+            // TODO(eliza): use `MaybeUninit::assume_init_ref` here once it's
+            // supported by `tracing-appender`'s MSRV.
+            f(&*(&*value).as_ptr())
         })
     }
 
     #[inline]
     pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
         self.slot.value.with_mut(|value| unsafe {
-            // Safety: if a `Ref` exists, we have exclusive ownership of the slot.
-            f(&mut *value)
+            // Safety: if a `Ref` exists, we have exclusive ownership of the
+            // slot.
+            // TODO(eliza): use `MaybeUninit::assume_init_mut` here once it's
+            // supported by `tracing-appender`'s MSRV.
+            f(&mut *(&mut *value).as_mut_ptr())
         })
     }
 }
@@ -348,41 +400,21 @@ impl<T: fmt::Write> fmt::Write for Ref<'_, T> {
 
 // === impl Slot ===
 
-impl<T: Default> Default for Slot<T> {
-    fn default() -> Self {
-        Self::new(T::default())
-    }
-}
-
 impl<T> Slot<T> {
-    const UNINIT: usize = usize::MAX;
-
     #[cfg(not(test))]
-    pub const fn new(t: T) -> Self {
+    const fn empty() -> Self {
         Self {
-            value: UnsafeCell::new(t),
-            state: AtomicUsize::new(Self::UNINIT),
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+            state: AtomicUsize::new(0),
         }
     }
 
     #[cfg(test)]
-    pub fn new(t: T) -> Self {
+    fn empty() -> Self {
         Self {
-            value: UnsafeCell::new(t),
-            state: AtomicUsize::new(Self::UNINIT),
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+            state: AtomicUsize::new(0),
         }
-    }
-}
-
-impl<T> Slot<MaybeUninit<T>> {
-    #[cfg(not(test))]
-    pub const fn uninit() -> Self {
-        Self::new(MaybeUninit::uninit())
-    }
-
-    #[cfg(test)]
-    pub fn uninit() -> Self {
-        Self::new(MaybeUninit::uninit())
     }
 }
 
