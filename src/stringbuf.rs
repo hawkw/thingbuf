@@ -19,7 +19,7 @@ impl StringBuf {
 
 impl<S> StringBuf<S>
 where
-    S: AsRef<[Slot<String>]>,
+    S: AsArray<String>,
 {
     pub fn from_array(array: S) -> Self {
         Self {

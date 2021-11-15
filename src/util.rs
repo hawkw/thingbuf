@@ -12,6 +12,8 @@ pub(crate) struct Backoff(u8);
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq, Debug)]
 pub(crate) struct CachePadded<T>(pub(crate) T);
 
+pub trait Sealed {}
+
 // === impl Backoff ===
 
 impl Backoff {

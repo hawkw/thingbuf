@@ -30,17 +30,21 @@ macro_rules! test_dbg {
     };
 }
 
+mod array;
 mod loom;
 #[cfg(test)]
 mod tests;
 mod util;
 
-use crate::loom::{
-    atomic::{AtomicUsize, Ordering},
-    UnsafeCell,
+use crate::{
+    loom::{
+        atomic::{AtomicUsize, Ordering},
+        UnsafeCell,
+    },
+    util::{Backoff, CachePadded},
 };
 
-use crate::util::{Backoff, CachePadded};
+pub use crate::array::AsArray;
 
 #[cfg(feature = "alloc")]
 mod stringbuf;
@@ -137,12 +141,12 @@ impl<T, S> ThingBuf<T, S> {
 
 impl<T, S> ThingBuf<T, S>
 where
-    S: AsRef<[Slot<T>]>,
+    S: AsArray<T>,
 {
     pub fn from_array(slots: S) -> Self {
-        let capacity = slots.as_ref().len();
+        let capacity = slots.len();
         assert!(capacity > 0);
-        for (idx, slot) in slots.as_ref().iter().enumerate() {
+        for (idx, slot) in slots.as_array().iter().enumerate() {
             // Relaxed is fine here, because the slot is not shared yet.
             slot.state.store(idx, Ordering::Relaxed);
         }
@@ -169,7 +173,7 @@ where
     pub fn push_ref(&self) -> Result<Ref<'_, T>, AtCapacity> {
         let mut backoff = Backoff::new();
         let mut tail = self.tail.load(Ordering::Relaxed);
-        let slots = self.slots.as_ref();
+        let slots = self.slots.as_array();
 
         loop {
             let (idx, gen) = self.idx_gen(tail);
@@ -223,7 +227,7 @@ where
     pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
         let mut backoff = Backoff::new();
         let mut head = self.head.load(Ordering::Relaxed);
-        let slots = self.slots.as_ref();
+        let slots = self.slots.as_array();
 
         loop {
             test_dbg!(head);
