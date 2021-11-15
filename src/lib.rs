@@ -332,6 +332,24 @@ impl<T: Default, S> fmt::Debug for ThingBuf<T, S> {
     }
 }
 
+impl<T, S /*: AsArray<T> */> Drop for ThingBuf<T, S> {
+    fn drop(&mut self) {
+        let tail = self.tail.load(Ordering::SeqCst);
+        let (idx, gen) = self.idx_gen(tail);
+        let num_initialized = if gen > 0 { self.capacity } else { idx };
+        // HAHAH THIS DOESN'T FUCKIN WORK BECAUSE WE CAN'T HAVE AN ASARRAY BOUND
+        // BC THEN THE CONST CONSTRUCTORS DON'T WORK
+
+        // fuckin kill me
+        for slot in self.slots.as_array()[..num_initialized] {
+            unsafe {
+                slot.value
+                    .with_mut(|value| core::ptr::drop_in_place((*value).as_mut_ptr()));
+            }
+        }
+    }
+}
+
 // === impl Ref ===
 
 impl<T> Ref<'_, T> {
