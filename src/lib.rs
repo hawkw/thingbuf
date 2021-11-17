@@ -1,4 +1,4 @@
-use core::{fmt, marker::PhantomData, mem::MaybeUninit};
+use core::{fmt, mem::MaybeUninit, ops::Index};
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -30,11 +30,21 @@ macro_rules! test_dbg {
     };
 }
 
-mod array;
 mod loom;
-#[cfg(test)]
-mod tests;
 mod util;
+
+#[cfg(feature = "alloc")]
+mod thingbuf;
+#[cfg(feature = "alloc")]
+pub use self::thingbuf::ThingBuf;
+#[cfg(feature = "alloc")]
+mod stringbuf;
+
+#[cfg(feature = "alloc")]
+pub use stringbuf::{StaticStringBuf, StringBuf};
+
+mod static_thingbuf;
+pub use self::static_thingbuf::StaticThingBuf;
 
 use crate::{
     loom::{
@@ -44,28 +54,14 @@ use crate::{
     util::{Backoff, CachePadded},
 };
 
-pub use crate::array::AsArray;
-
-#[cfg(feature = "alloc")]
-mod stringbuf;
-
-#[cfg(feature = "alloc")]
-pub use stringbuf::StringBuf;
-
-/// A ringbuf of...things.
-///
-/// # Examples
-///
-/// Using a
-pub struct ThingBuf<T, S = Box<[Slot<T>]>> {
+#[derive(Debug)]
+struct Core {
     head: CachePadded<AtomicUsize>,
     tail: CachePadded<AtomicUsize>,
     gen: usize,
     gen_mask: usize,
     idx_mask: usize,
     capacity: usize,
-    slots: S,
-    _t: PhantomData<T>,
 }
 
 pub struct Ref<'slot, T> {
@@ -81,12 +77,9 @@ pub struct Slot<T> {
     state: AtomicUsize,
 }
 
-// === impl ThingBuf ===
-
-impl<T: Default> ThingBuf<T> {
-    pub fn new(capacity: usize) -> Self {
-        assert!(capacity > 0);
-        let slots = (0..capacity).map(|_| Slot::empty()).collect();
+impl Core {
+    #[cfg(not(test))]
+    const fn new(capacity: usize) -> Self {
         let gen = (capacity + 1).next_power_of_two();
         let idx_mask = gen - 1;
         let gen_mask = !(gen - 1);
@@ -97,18 +90,12 @@ impl<T: Default> ThingBuf<T> {
             gen_mask,
             idx_mask,
             capacity,
-            slots,
-            _t: PhantomData,
         }
     }
-}
 
-#[cfg(not(test))]
-impl<T, const CAPACITY: usize> ThingBuf<T, [Slot<T>; CAPACITY]> {
-    const SLOT: Slot<T> = Slot::empty();
-
-    pub const fn new_static() -> Self {
-        let gen = (CAPACITY + 1).next_power_of_two();
+    #[cfg(test)]
+    fn new(capacity: usize) -> Self {
+        let gen = (capacity + 1).next_power_of_two();
         let idx_mask = gen - 1;
         let gen_mask = !(gen - 1);
         Self {
@@ -117,14 +104,10 @@ impl<T, const CAPACITY: usize> ThingBuf<T, [Slot<T>; CAPACITY]> {
             gen,
             gen_mask,
             idx_mask,
-            capacity: CAPACITY,
-            slots: [Self::SLOT; CAPACITY],
-            _t: PhantomData,
+            capacity,
         }
     }
-}
 
-impl<T, S> ThingBuf<T, S> {
     #[inline]
     fn idx_gen(&self, val: usize) -> (usize, usize) {
         (val & self.idx_mask, val & self.gen_mask)
@@ -144,47 +127,19 @@ impl<T, S> ThingBuf<T, S> {
         }
     }
 
-    pub fn capacity(&self) -> usize {
+    #[inline]
+    fn capacity(&self) -> usize {
         self.capacity
     }
-}
 
-impl<T: Default, S> ThingBuf<T, S>
-where
-    S: AsArray<T>,
-{
-    pub fn from_array(slots: S) -> Self {
-        let capacity = slots.len();
-        assert!(capacity > 0);
-        // for (idx, slot) in slots.as_array().iter().enumerate() {
-        //     // Relaxed is fine here, because the slot is not shared yet.
-        //     slot.state.store(idx, Ordering::Relaxed);
-        // }
-        let gen = (capacity + 1).next_power_of_two();
-        let idx_mask = gen - 1;
-        let gen_mask = !(gen - 1);
-        Self {
-            head: CachePadded(AtomicUsize::new(0)),
-            tail: CachePadded(AtomicUsize::new(0)),
-            gen,
-            gen_mask,
-            idx_mask,
-            capacity,
-            slots,
-            _t: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub fn push_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Result<U, AtCapacity> {
-        self.push_ref().map(|mut r| r.with_mut(f))
-    }
-
-    pub fn push_ref(&self) -> Result<Ref<'_, T>, AtCapacity> {
+    fn push_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, AtCapacity>
+    where
+        T: Default,
+        S: Index<usize, Output = Slot<T>> + ?Sized,
+    {
         test_println!("push_ref");
         let mut backoff = Backoff::new();
         let mut tail = self.tail.load(Ordering::Relaxed);
-        let slots = self.slots.as_array();
 
         loop {
             let (idx, gen) = self.idx_gen(tail);
@@ -243,16 +198,13 @@ where
         }
     }
 
-    #[inline]
-    pub fn pop_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
-        self.pop_ref().map(|mut r| r.with_mut(f))
-    }
-
-    pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
+    fn pop_ref<'slots, T, S>(&self, slots: &'slots S) -> Option<Ref<'slots, T>>
+    where
+        S: Index<usize, Output = Slot<T>> + ?Sized,
+    {
         test_println!("pop_ref");
         let mut backoff = Backoff::new();
         let mut head = self.head.load(Ordering::Relaxed);
-        let slots = self.slots.as_array();
 
         loop {
             test_dbg!(head);
@@ -304,7 +256,7 @@ where
         }
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         use std::cmp;
         loop {
             let tail = self.tail.load(Ordering::SeqCst);
@@ -319,32 +271,6 @@ where
                     _ if tail == head => 0,
                     _ => self.capacity,
                 };
-            }
-        }
-    }
-}
-
-impl<T: Default, S> fmt::Debug for ThingBuf<T, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ThingBuf")
-            .field("capacity", &self.capacity())
-            .finish()
-    }
-}
-
-impl<T, S /*: AsArray<T> */> Drop for ThingBuf<T, S> {
-    fn drop(&mut self) {
-        let tail = self.tail.load(Ordering::SeqCst);
-        let (idx, gen) = self.idx_gen(tail);
-        let num_initialized = if gen > 0 { self.capacity } else { idx };
-        // HAHAH THIS DOESN'T FUCKIN WORK BECAUSE WE CAN'T HAVE AN ASARRAY BOUND
-        // BC THEN THE CONST CONSTRUCTORS DON'T WORK
-
-        // fuckin kill me
-        for slot in self.slots.as_array()[..num_initialized] {
-            unsafe {
-                slot.value
-                    .with_mut(|value| core::ptr::drop_in_place((*value).as_mut_ptr()));
             }
         }
     }
