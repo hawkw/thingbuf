@@ -1,5 +1,14 @@
-use crate::loom;
+use crate::loom::{
+    self,
+    atomic::{AtomicUsize, Ordering},
+    UnsafeCell,
+};
 use core::ops::{Deref, DerefMut};
+
+pub(crate) struct Registration<T> {
+    state: AtomicUsize,
+    val: UnsafeCell<Option<T>>,
+}
 
 #[derive(Debug)]
 pub(crate) struct Backoff(u8);
@@ -20,6 +29,11 @@ pub(crate) fn panicking() -> bool {
 #[cfg(not(feature = "std"))]
 pub(crate) fn panicking() -> bool {
     false
+}
+
+// === impl Registration ===
+
+
 }
 
 // === impl Backoff ===

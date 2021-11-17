@@ -6,7 +6,7 @@ use core::{fmt, ptr};
 #[cfg(test)]
 mod tests;
 
-pub struct ThingBuf<T: Default> {
+pub struct ThingBuf<T> {
     core: Core,
     slots: Box<[Slot<T>]>,
 }
@@ -40,7 +40,9 @@ impl<T: Default> ThingBuf<T> {
     pub fn pop_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
         self.pop_ref().map(|mut r| r.with_mut(f))
     }
+}
 
+impl<T> ThingBuf<T> {
     #[inline]
     pub fn capacity(&self) -> usize {
         self.slots.len()
@@ -57,7 +59,7 @@ impl<T: Default> ThingBuf<T> {
     }
 }
 
-impl<T: Default> Drop for ThingBuf<T> {
+impl<T> Drop for ThingBuf<T> {
     fn drop(&mut self) {
         let tail = self.core.tail.load(Ordering::SeqCst);
         let (idx, gen) = self.core.idx_gen(tail);
@@ -71,7 +73,7 @@ impl<T: Default> Drop for ThingBuf<T> {
     }
 }
 
-impl<T: Default> fmt::Debug for ThingBuf<T> {
+impl<T> fmt::Debug for ThingBuf<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ThingBuf")
             .field("capacity", &self.capacity())

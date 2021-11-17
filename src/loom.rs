@@ -2,6 +2,7 @@ pub(crate) use self::inner::*;
 
 #[cfg(test)]
 mod inner {
+    pub(crate) use loom::sync;
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
@@ -72,6 +73,13 @@ mod inner {
 #[cfg(not(test))]
 mod inner {
     #![allow(dead_code)]
+    pub(crate) mod sync {
+        pub use core::sync::*;
+
+        #[cfg(feature = "alloc")]
+        pub use alloc::sync::*;
+    }
+
     pub(crate) use core::sync::atomic;
 
     #[cfg(feature = "std")]
