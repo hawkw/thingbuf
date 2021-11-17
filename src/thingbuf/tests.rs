@@ -1,5 +1,5 @@
 use super::ThingBuf;
-use crate::loom::{self, thread};
+use crate::loom::{self, alloc, thread};
 use std::sync::Arc;
 
 #[test]
@@ -7,12 +7,15 @@ fn push_many_mpsc() {
     const T1_VALS: &[&str] = &["alice", "bob", "charlie"];
     const T2_VALS: &[&str] = &["dave", "ellen", "francis"];
 
-    fn producer(vals: &'static [&'static str], q: &Arc<ThingBuf<String>>) -> impl FnOnce() {
+    fn producer(
+        vals: &'static [&'static str],
+        q: &Arc<ThingBuf<alloc::Track<String>>>,
+    ) -> impl FnOnce() {
         let q = q.clone();
         move || {
             for &val in vals {
                 if let Ok(mut r) = test_dbg!(q.push_ref()) {
-                    r.with_mut(|r| r.push_str(val));
+                    r.with_mut(|r| r.get_mut().push_str(val));
                 } else {
                     return;
                 }
@@ -30,7 +33,7 @@ fn push_many_mpsc() {
 
         while Arc::strong_count(&q) > 1 {
             if let Some(r) = q.pop_ref() {
-                r.with(|val| all_vals.push(val.to_string()));
+                r.with(|val| all_vals.push(val.get_ref().to_string()));
             }
             thread::yield_now();
         }
@@ -39,7 +42,7 @@ fn push_many_mpsc() {
         t2.join().unwrap();
 
         while let Some(r) = test_dbg!(q.pop_ref()) {
-            r.with(|val| all_vals.push(val.to_string()));
+            r.with(|val| all_vals.push(val.get_ref().to_string()));
         }
 
         test_dbg!(&all_vals);

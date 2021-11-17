@@ -1,40 +1,34 @@
-use std::{fmt::Write, sync::Arc, thread};
-use thingbuf::{Slot, StringBuf, ThingBuf};
+use std::{
+    fmt::Write,
+    sync::atomic::{AtomicBool, Ordering},
+    thread,
+};
+use thingbuf::{StaticStringBuf, StaticThingBuf};
 
 #[test]
 fn static_storage_thingbuf() {
-    let thingbuf = Arc::new(ThingBuf::from_array([
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-        Slot::new(0),
-    ]));
+    static BUF: StaticThingBuf<i32, 16> = StaticThingBuf::new();
+    static PRODUCER_LIVE: AtomicBool = AtomicBool::new(true);
 
-    let producer = {
-        let thingbuf = thingbuf.clone();
-        thread::spawn(move || {
-            for i in 0..32 {
-                let mut thing = 'write: loop {
-                    match thingbuf.push_ref() {
-                        Ok(thing) => break 'write thing,
-                        _ => thread::yield_now(),
-                    }
-                };
-                thing.with_mut(|thing| *thing = i);
-            }
-        })
-    };
+    let producer = thread::spawn(move || {
+        for i in 0..32 {
+            let mut thing = 'write: loop {
+                match BUF.push_ref() {
+                    Ok(thing) => break 'write thing,
+                    _ => thread::yield_now(),
+                }
+            };
+            thing.with_mut(|thing| *thing = i);
+        }
+        PRODUCER_LIVE.store(false, Ordering::Release);
+    });
 
     let mut i = 0;
 
     // While the producer is writing to the queue, push each entry to the
     // results string.
-    while Arc::strong_count(&thingbuf) > 1 {
-        match thingbuf.pop_ref() {
+    while PRODUCER_LIVE.load(Ordering::Acquire) {
+        match BUF.pop_ref() {
             Some(thing) => thing.with(|thing| {
                 assert_eq!(*thing, i);
                 i += 1;
@@ -46,7 +40,7 @@ fn static_storage_thingbuf() {
     producer.join().unwrap();
 
     // drain the queue.
-    while let Some(thing) = thingbuf.pop_ref() {
+    while let Some(thing) = BUF.pop_ref() {
         thing.with(|thing| {
             assert_eq!(*thing, i);
             i += 1;
@@ -56,52 +50,45 @@ fn static_storage_thingbuf() {
 
 #[test]
 fn static_storage_stringbuf() {
-    let stringbuf = Arc::new(StringBuf::from_array([
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-        Slot::new(String::new()),
-    ]));
+    static BUF: StaticStringBuf<8> = StaticStringBuf::new();
+    static PRODUCER_LIVE: AtomicBool = AtomicBool::new(true);
 
-    let producer = {
-        let stringbuf = stringbuf.clone();
-        thread::spawn(move || {
-            for i in 0..16 {
-                let mut string = 'write: loop {
-                    match stringbuf.write() {
-                        Ok(string) => break 'write string,
-                        _ => thread::yield_now(),
-                    }
-                };
+    let producer = thread::spawn(move || {
+        for i in 0..16 {
+            let mut string = 'write: loop {
+                match BUF.write() {
+                    Ok(string) => break 'write string,
+                    _ => thread::yield_now(),
+                }
+            };
 
-                write!(&mut string, "{:?}", i).unwrap();
-            }
-        })
-    };
+            write!(&mut string, "{:?}", i).unwrap();
+        }
+
+        PRODUCER_LIVE.store(false, Ordering::Release);
+        println!("producer done");
+    });
 
     let mut results = String::new();
 
     // While the producer is writing to the queue, push each entry to the
     // results string.
-    while Arc::strong_count(&stringbuf) > 1 {
-        if let Some(string) = stringbuf.pop_ref() {
+    while PRODUCER_LIVE.load(Ordering::Acquire) {
+        if let Some(string) = BUF.pop_ref() {
             writeln!(results, "{}", string).unwrap();
         }
         thread::yield_now();
     }
 
     producer.join().unwrap();
+    println!("producer done...");
 
     // drain the queue.
-    while let Some(string) = stringbuf.pop_ref() {
+    while let Some(string) = BUF.pop_ref() {
         writeln!(results, "{}", string).unwrap();
     }
 
-    let results = dbg!(results);
+    println!("results:\n{}", results);
 
     for (n, ln) in results.lines().enumerate() {
         assert_eq!(ln.parse::<usize>(), Ok(n));

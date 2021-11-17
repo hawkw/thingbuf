@@ -12,6 +12,16 @@ pub(crate) struct Backoff(u8);
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq, Debug)]
 pub(crate) struct CachePadded<T>(pub(crate) T);
 
+#[cfg(feature = "std")]
+pub(crate) fn panicking() -> bool {
+    std::thread::panicking()
+}
+
+#[cfg(not(feature = "std"))]
+pub(crate) fn panicking() -> bool {
+    false
+}
+
 // === impl Backoff ===
 
 impl Backoff {
