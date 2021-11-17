@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 use core::{fmt, mem::MaybeUninit, ops::Index};
 
 #[cfg(feature = "alloc")]
@@ -6,12 +8,11 @@ extern crate alloc;
 macro_rules! test_println {
     ($($arg:tt)*) => {
         if cfg!(test) {
-            if std::thread::panicking() {
+            if crate::util::panicking() {
                 // getting the thread ID while panicking doesn't seem to play super nicely with loom's
                 // mock lazy_static...
                 println!("[PANIC {:>17}:{:<3}] {}", file!(), line!(), format_args!($($arg)*))
             } else {
-                #[cfg(test)]
                 println!("[{:?} {:>17}:{:<3}] {}", crate::loom::thread::current().id(), file!(), line!(), format_args!($($arg)*))
             }
         }

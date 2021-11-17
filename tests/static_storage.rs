@@ -53,22 +53,21 @@ fn static_storage_stringbuf() {
     static BUF: StaticStringBuf<8> = StaticStringBuf::new();
     static PRODUCER_LIVE: AtomicBool = AtomicBool::new(true);
 
-    let producer = {
-        thread::spawn(move || {
-            for i in 0..16 {
-                let mut string = 'write: loop {
-                    match BUF.write() {
-                        Ok(string) => break 'write string,
-                        _ => thread::yield_now(),
-                    }
-                };
+    let producer = thread::spawn(move || {
+        for i in 0..16 {
+            let mut string = 'write: loop {
+                match BUF.write() {
+                    Ok(string) => break 'write string,
+                    _ => thread::yield_now(),
+                }
+            };
 
-                write!(&mut string, "{:?}", i).unwrap();
+            write!(&mut string, "{:?}", i).unwrap();
+        }
 
-                PRODUCER_LIVE.store(false, Ordering::Release);
-            }
-        })
-    };
+        PRODUCER_LIVE.store(false, Ordering::Release);
+        println!("producer done");
+    });
 
     let mut results = String::new();
 
@@ -82,6 +81,7 @@ fn static_storage_stringbuf() {
     }
 
     producer.join().unwrap();
+    println!("producer done...");
 
     // drain the queue.
     while let Some(string) = BUF.pop_ref() {
