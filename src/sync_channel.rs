@@ -1,8 +1,28 @@
 use super::*;
-use crate::loom::{
-    sync::Arc,
-    thread::{self, Thread},
+use crate::{
+    loom::{
+        atomic::{AtomicUsize, Ordering},
+        sync::Arc,
+        thread::{self, Thread},
+    },
+    wait::WaitCell,
 };
+
+#[cfg(test)]
+mod tests;
+
+pub fn sync_channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
+    let inner = Arc::new(Inner {
+        thingbuf,
+        rx_wait: WaitCell::new(),
+        tx_count: AtomicUsize::new(1),
+    });
+    let tx = Sender {
+        inner: inner.clone(),
+    };
+    let rx = Receiver { inner };
+    (tx, rx)
+}
 
 pub struct Sender<T> {
     inner: Arc<Inner<T>>,
@@ -12,113 +32,159 @@ pub struct Receiver<T> {
     inner: Arc<Inner<T>>,
 }
 
-struct Inner<T> {
-    thingbuf: ThingBuf<T>,
-    rx_thread: UnsafeCell<Option<Thread>>,
-    rx_lock: AtomicUsize,
+pub struct SendRef<'a, T> {
+    inner: &'a Inner<T>,
+    slot: Ref<'a, T>,
 }
 
-impl<T> Inner<T> {
-    const RX_WAITING: usize = 0b00;
-    const RX_PARKING: usize = 0b01;
-    const RX_UNPARKING: usize = 0b10;
+struct Inner<T> {
+    thingbuf: ThingBuf<T>,
+    rx_wait: WaitCell<Thread>,
+    tx_count: AtomicUsize,
+}
 
-    fn park_rx(&self) {
-        // this is based on tokio's AtomicWaker synchronization strategy
-        match self.rx_lock.compare_exchange(
-            Self::RX_WAITING,
-            Self::RX_PARKING,
-            Ordering::Acquire,
-            Ordering::Acquire,
-        ) {
-            // someone else is unparking the receiver, so don't park!
-            Err(Self::RX_UNPARKING) => return,
-            Err(actual) => {
-                debug_assert!(
-                    actual == Self::RX_PARKING || actual == Self::RX_PARKING | Self::RX_UNPARKING
-                );
-                return;
-            }
-            Ok(_) => {}
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum TrySendError {
+    AtCapacity(AtCapacity),
+    Closed,
+}
+
+// === impl Sender ===
+
+impl<T: Default> Sender<T> {
+    pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
+        self.inner
+            .thingbuf
+            .push_ref()
+            .map(|slot| SendRef {
+                inner: &*self.inner,
+                slot,
+            })
+            .map_err(TrySendError::AtCapacity)
+    }
+
+    pub fn try_send(&self, val: T) -> Result<(), TrySendError> {
+        self.inner
+            .thingbuf
+            .push_ref()
+            .map_err(TrySendError::AtCapacity)?
+            .with_mut(|slot| {
+                *slot = val;
+            });
+        Ok(())
+    }
+}
+
+impl<T> Clone for Sender<T> {
+    fn clone(&self) -> Self {
+        self.inner.tx_count.fetch_add(1, Ordering::Relaxed);
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T> Drop for Sender<T> {
+    fn drop(&mut self) {
+        if self.inner.tx_count.fetch_sub(1, Ordering::Release) != 1 {
+            return;
         }
 
-        let prev_rx = self
-            .rx_thread
-            .with_mut(|thread| unsafe { (*thread).replace(thread::current()) });
+        // if we are the last sender, synchronize
+        let _ = self.inner.tx_count.load(Ordering::Acquire);
+        self.inner.rx_wait.notify();
+    }
+}
 
-        match self.rx_lock.compare_exchange(
-            Self::RX_PARKING,
-            Self::RX_WAITING,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => {
-                #[cfg(not(test))]
-                thread::park();
+// === impl Receiver ===
+
+impl<T: Default> Receiver<T> {
+    pub fn recv_ref(&self) -> Option<Ref<'_, T>> {
+        loop {
+            // If we got a value, return it!
+            if let Some(r) = self.inner.thingbuf.pop_ref() {
+                return Some(r);
+            }
+
+            // Are there live senders? If not, the channel is closed...
+            if self.is_closed() {
+                return None;
+            }
+
+            // otherwise, gotosleep
+            if self.inner.rx_wait.wait_with(thread::current) {
                 #[cfg(test)]
                 {
-                    // Loom doesn't have `Thread::unpark`, but because loom
-                    // tests will only have a limited number of threads,
-                    // calling `yield_now` should be roughly equivalent...i
-                    // hope...lol.
-                    test_println!("parking {:?}", thread::current());
-                    loom::thread::yield_now();
+                    test_println!("sleeping ({:?})", thread::current());
+                    thread::yield_now();
                 }
-            }
-            Err(actual) => {
-                debug_assert_eq!(actual, Self::RX_PARKING | Self::RX_UNPARKING);
-                let mut rx = self
-                    .rx_thread
-                    .with_mut(|thread| unsafe { (*thread).take() });
-
-                if let Some(prev_rx) = prev_rx {
-                    #[cfg(not(test))]
-                    prev_rx.unpark();
-                    #[cfg(test)]
-                    {
-                        // Loom doesn't have `Thread::unpark`, but because loom
-                        // tests will only have a limited number of threads,
-                        // calling `yield_now` should be roughly equivalent...i
-                        // hope...lol.
-                        test_println!("unparking {:?}", prev_rx);
-                        loom::thread::yield_now();
-                    }
-                }
+                #[cfg(not(test))]
+                thread::park();
             }
         }
     }
 
-    fn unpark_rx(&self) {
-        match self.rx_lock.fetch_or(Self::RX_UNPARKING, Ordering::AcqRel) {
-            Self::RX_WAITING => {
-                // we have the lock!
-                let rx = self
-                    .rx_thread
-                    .with_mut(|thread| unsafe { (*thread).take() });
-                self.rx_lock
-                    .fetch_and(!Self::RX_UNPARKING, Ordering::Release);
+    pub fn is_closed(&self) -> bool {
+        self.inner.tx_count.load(Ordering::SeqCst) <= 1
+    }
+}
 
-                if let Some(rx) = rx {
-                    #[cfg(not(test))]
-                    rx.unpark();
-                    #[cfg(test)]
-                    {
-                        // Loom doesn't have `Thread::unpark`, but because loom
-                        // tests will only have a limited number of threads,
-                        // calling `yield_now` should be roughly equivalent...i
-                        // hope...lol.
-                        test_println!("unparking {:?}", rx);
-                        loom::thread::yield_now();
-                    }
-                }
-            }
-            actual => {
-                debug_assert!(
-                    actual == Self::RX_PARKING
-                        || actual == Self::RX_PARKING | Self::RX_UNPARKING
-                        || actual == Self::RX_UNPARKING
-                )
-            }
-        }
+impl<'a, T: Default> Iterator for &'a Receiver<T> {
+    type Item = Ref<'a, T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.recv_ref()
+    }
+}
+
+// === impl SendRef ===
+
+impl<T> SendRef<'_, T> {
+    #[inline]
+    pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
+        self.slot.with(f)
+    }
+
+    #[inline]
+    pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
+        self.slot.with_mut(f)
+    }
+}
+
+impl<T> Drop for SendRef<'_, T> {
+    #[inline]
+    fn drop(&mut self) {
+        test_println!("drop SendRef");
+        self.inner.rx_wait.notify();
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for SendRef<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.with(|val| fmt::Debug::fmt(val, f))
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for SendRef<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.with(|val| fmt::Display::fmt(val, f))
+    }
+}
+
+impl<T: fmt::Write> fmt::Write for SendRef<'_, T> {
+    #[inline]
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.with_mut(|val| val.write_str(s))
+    }
+
+    #[inline]
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        self.with_mut(|val| val.write_char(c))
+    }
+
+    #[inline]
+    fn write_fmt(&mut self, f: fmt::Arguments<'_>) -> fmt::Result {
+        self.with_mut(|val| val.write_fmt(f))
     }
 }
