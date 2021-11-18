@@ -112,12 +112,7 @@ impl Notify for thread::Thread {
             // tests will only have a limited number of threads,
             // calling `yield_now` should be roughly equivalent...i
             // hope...lol.
-            debug_assert_ne!(
-                thread::current().id(),
-                self.id(),
-                "attempted to unpark a thread from itself"
-            );
-            test_println!("NOTIFYING {:?}", self);
+            test_println!("NOTIFYING {:?} (from {:?})", self, thread::current());
             thread::yield_now();
         }
     }
