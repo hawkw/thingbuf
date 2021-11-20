@@ -1,10 +1,13 @@
 use super::*;
-use crate::loom::{self, thread};
+use crate::{
+    loom::{self, thread},
+    ThingBuf,
+};
 
 #[test]
 fn basically_works() {
     loom::model(|| {
-        let (tx, rx) = sync_mpsc(crate::ThingBuf::new(4));
+        let (tx, rx) = sync_mpsc(ThingBuf::new(4));
 
         let p1 = {
             let tx = tx.clone();
@@ -36,7 +39,7 @@ fn basically_works() {
 fn rx_closes() {
     const ITERATIONS: usize = 6;
     loom::model(|| {
-        let (tx, rx) = sync_mpsc(crate::ThingBuf::new(ITERATIONS / 2));
+        let (tx, rx) = sync_mpsc(ThingBuf::new(ITERATIONS / 2));
 
         let producer = thread::spawn(move || {
             'iters: for i in 0..=ITERATIONS {
@@ -60,5 +63,49 @@ fn rx_closes() {
         drop(rx);
 
         producer.join().unwrap();
+    })
+}
+
+#[test]
+fn spsc_recv_then_send() {
+    loom::model(|| {
+        let (tx, rx) = sync_mpsc(ThingBuf::<i32>::new(4));
+        let consumer = thread::spawn(move || {
+            assert_eq!(rx.recv().unwrap(), 10);
+        });
+
+        tx.try_send(10).unwrap();
+        consumer.join().unwrap();
+    })
+}
+
+#[test]
+fn spsc_recv_then_close() {
+    loom::model(|| {
+        let (tx, rx) = sync_mpsc(ThingBuf::<i32>::new(4));
+        let producer = thread::spawn(move || {
+            drop(tx);
+        });
+
+        assert_eq!(rx.recv(), None);
+
+        producer.join().unwrap();
+    });
+}
+
+#[test]
+fn spsc_recv_then_send_then_close() {
+    loom::model(|| {
+        let (tx, rx) = sync_mpsc(ThingBuf::<i32>::new(2));
+        let consumer = thread::spawn(move || {
+            assert_eq!(rx.recv().unwrap(), 10);
+            assert_eq!(rx.recv().unwrap(), 20);
+            assert_eq!(rx.recv(), None);
+        });
+
+        tx.try_send(10).unwrap();
+        tx.try_send(20).unwrap();
+        drop(tx);
+        consumer.join().unwrap();
     })
 }
