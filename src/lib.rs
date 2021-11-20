@@ -23,7 +23,9 @@ feature! {
 
 feature! {
     #![feature = "std"]
-    pub mod sync_channel;
+    pub mod sync_mpsc;
+    #[doc(inline)]
+    pub use sync_mpsc::sync_mpsc;
 }
 
 mod static_thingbuf;

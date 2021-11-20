@@ -4,7 +4,7 @@ use crate::loom::{self, thread};
 #[test]
 fn basically_works() {
     loom::model(|| {
-        let (tx, rx) = sync_channel(crate::ThingBuf::new(4));
+        let (tx, rx) = sync_mpsc(crate::ThingBuf::new(4));
 
         let p1 = {
             let tx = tx.clone();
@@ -36,7 +36,7 @@ fn basically_works() {
 fn rx_closes() {
     const ITERATIONS: usize = 6;
     loom::model(|| {
-        let (tx, rx) = sync_channel(crate::ThingBuf::new(ITERATIONS / 2));
+        let (tx, rx) = sync_mpsc(crate::ThingBuf::new(ITERATIONS / 2));
 
         let producer = thread::spawn(move || {
             'iters: for i in 0..=ITERATIONS {
