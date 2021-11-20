@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
     loom::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{self, AtomicUsize, Ordering},
         sync::Arc,
         thread::{self, Thread},
     },
-    wait::WaitCell,
+    wait::{WaitCell, WaitResult},
 };
 
 #[cfg(test)]
@@ -78,7 +78,7 @@ impl<T: Default> Sender<T> {
 
 impl<T> Clone for Sender<T> {
     fn clone(&self) -> Self {
-        self.inner.tx_count.fetch_add(1, Ordering::Relaxed);
+        test_dbg!(self.inner.tx_count.fetch_add(1, Ordering::Relaxed));
         Self {
             inner: self.inner.clone(),
         }
@@ -87,13 +87,13 @@ impl<T> Clone for Sender<T> {
 
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
-        if self.inner.tx_count.fetch_sub(1, Ordering::Release) != 1 {
+        if test_dbg!(self.inner.tx_count.fetch_sub(1, Ordering::Release)) > 1 {
             return;
         }
 
         // if we are the last sender, synchronize
-        let _ = self.inner.tx_count.load(Ordering::Acquire);
-        self.inner.rx_wait.notify();
+        test_dbg!(self.inner.tx_count.load(Ordering::SeqCst));
+        self.inner.rx_wait.close_tx();
     }
 }
 
@@ -107,26 +107,26 @@ impl<T: Default> Receiver<T> {
                 return Some(r);
             }
 
-            // Are there live senders? If not, the channel is closed...
-            if self.is_closed() {
-                return None;
-            }
-
             // otherwise, gotosleep
-            if self.inner.rx_wait.wait_with(thread::current) {
-                #[cfg(test)]
-                {
-                    test_println!("sleeping ({:?})", thread::current());
-                    thread::yield_now();
+            match test_dbg!(self.inner.rx_wait.wait_with(thread::current)) {
+                WaitResult::TxClosed => {
+                    // All senders have been dropped, but the channel might
+                    // still have messages in it...
+                    return self.inner.thingbuf.pop_ref();
                 }
-                #[cfg(not(test))]
-                thread::park();
+                WaitResult::Wait => {
+                    test_println!("parking ({:?})", thread::current());
+                    thread::park();
+                }
+                WaitResult::Notified => {
+                    loom::hint::spin_loop();
+                }
             }
         }
     }
 
     pub fn is_closed(&self) -> bool {
-        self.inner.tx_count.load(Ordering::SeqCst) <= 1
+        test_dbg!(self.inner.tx_count.load(Ordering::SeqCst)) <= 1
     }
 }
 

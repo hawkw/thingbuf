@@ -12,6 +12,13 @@ pub(crate) struct WaitCell<T> {
     waiter: UnsafeCell<Option<T>>,
 }
 
+#[derive(Debug)]
+pub(crate) enum WaitResult {
+    Wait,
+    Notified,
+    TxClosed,
+}
+
 pub(crate) trait Notify {
     fn notify(self);
 }
@@ -22,6 +29,7 @@ impl<T: Notify> WaitCell<T> {
     const WAITING: usize = 0b00;
     const PARKING: usize = 0b01;
     const NOTIFYING: usize = 0b10;
+    const TX_CLOSED: usize = 0b100;
 
     pub(crate) fn new() -> Self {
         Self {
@@ -30,24 +38,29 @@ impl<T: Notify> WaitCell<T> {
         }
     }
 
-    pub(crate) fn wait_with(&self, f: impl FnOnce() -> T) -> bool {
+    pub(crate) fn wait_with(&self, f: impl FnOnce() -> T) -> WaitResult {
         test_println!("registering waiter");
 
         // this is based on tokio's AtomicWaker synchronization strategy
-        match self.lock.compare_exchange(
+        match test_dbg!(self.lock.compare_exchange(
             Self::WAITING,
             Self::PARKING,
+            Ordering::AcqRel,
             Ordering::Acquire,
-            Ordering::Acquire,
-        ) {
+        )) {
             // someone else is notifying the receiver, so don't park!
-            Err(Self::NOTIFYING) => {
-                test_println!("-> state = NOTIFYING");
-                return false;
+            Err(actual) if test_dbg!(actual & Self::TX_CLOSED) == Self::TX_CLOSED => {
+                test_println!("-> state = TX_CLOSED");
+                return WaitResult::TxClosed;
             }
+            Err(actual) if test_dbg!(actual & Self::NOTIFYING) == Self::NOTIFYING => {
+                test_println!("-> state = NOTIFYING");
+                return WaitResult::Notified;
+            }
+
             Err(actual) => {
                 debug_assert!(actual == Self::PARKING || actual == Self::PARKING | Self::NOTIFYING);
-                return true;
+                return WaitResult::Wait;
             }
             Ok(_) => {}
         }
@@ -63,24 +76,41 @@ impl<T: Notify> WaitCell<T> {
             Ordering::AcqRel,
             Ordering::Acquire,
         ) {
-            Ok(_) => true,
+            Ok(_) => WaitResult::Wait,
             Err(actual) => {
                 test_println!("-> was notified; state={:#b}", actual);
-                debug_assert_eq!(actual, Self::PARKING | Self::NOTIFYING);
+                // debug_assert_eq!(actual, Self::PARKING | Self::NOTIFYING);
                 let _ = self.waiter.with_mut(|waiter| unsafe { (*waiter).take() });
 
                 if let Some(prev_waiter) = prev_waiter {
                     prev_waiter.notify();
                 }
 
-                false
+                if actual & Self::TX_CLOSED == Self::TX_CLOSED {
+                    return WaitResult::TxClosed;
+                }
+
+                WaitResult::Notified
             }
         }
     }
 
     pub(crate) fn notify(&self) {
-        test_println!("notifying");
-        match self.lock.fetch_or(Self::NOTIFYING, Ordering::AcqRel) {
+        self.notify2(false)
+    }
+
+    pub(crate) fn close_tx(&self) {
+        self.notify2(true)
+    }
+
+    fn notify2(&self, close: bool) {
+        test_println!("notifying; close={:?};", close);
+        let bits = if close {
+            Self::NOTIFYING | Self::TX_CLOSED
+        } else {
+            Self::NOTIFYING
+        };
+        match test_dbg!(self.lock.fetch_or(bits, Ordering::AcqRel)) {
             Self::WAITING => {
                 // we have the lock!
                 let waiter = self.waiter.with_mut(|thread| unsafe { (*thread).take() });
@@ -104,16 +134,8 @@ impl<T: Notify> WaitCell<T> {
 #[cfg(feature = "std")]
 impl Notify for thread::Thread {
     fn notify(self) {
-        #[cfg(not(test))]
+        test_println!("NOTIFYING {:?} (from {:?})", self, thread::current());
         self.unpark();
-        #[cfg(test)]
-        {
-            // Loom doesn't have `Thread::unpark`, but because loom
-            // tests will only have a limited number of threads,
-            // calling `yield_now` should be roughly equivalent...i
-            // hope...lol.
-            test_println!("NOTIFYING {:?} (from {:?})", self, thread::current());
-            thread::yield_now();
-        }
+        thread::yield_now();
     }
 }
