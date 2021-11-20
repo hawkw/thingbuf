@@ -31,3 +31,34 @@ fn basically_works() {
         p2.join().unwrap();
     })
 }
+
+#[test]
+fn rx_closes() {
+    const ITERATIONS: usize = 6;
+    loom::model(|| {
+        let (tx, rx) = sync_channel(crate::ThingBuf::new(ITERATIONS / 2));
+
+        let producer = thread::spawn(move || {
+            'iters: for i in 0..=ITERATIONS {
+                'send: loop {
+                    match tx.try_send(i) {
+                        Ok(_) => break 'send,
+                        Err(TrySendError::AtCapacity(_)) => thread::yield_now(),
+                        Err(TrySendError::Closed(_)) => break 'iters,
+                    }
+                }
+                test_println!("sent {}\n", i);
+            }
+        });
+
+        for i in 0..ITERATIONS - 1 {
+            let n = rx.recv();
+
+            test_println!("recv {:?}\n", n);
+            assert_eq!(n, Some(i));
+        }
+        drop(rx);
+
+        producer.join().unwrap();
+    })
+}

@@ -1,7 +1,8 @@
 use super::*;
 use crate::{
+    error::TrySendError,
     loom::{
-        atomic::{self, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         sync::Arc,
         thread::{self, Thread},
     },
@@ -43,13 +44,6 @@ struct Inner<T> {
     tx_count: AtomicUsize,
 }
 
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum TrySendError {
-    AtCapacity(AtCapacity),
-    Closed,
-}
-
 // === impl Sender ===
 
 impl<T: Default> Sender<T> {
@@ -61,17 +55,20 @@ impl<T: Default> Sender<T> {
                 inner: &*self.inner,
                 slot,
             })
-            .map_err(TrySendError::AtCapacity)
+            .map_err(|e| {
+                if self.inner.rx_wait.is_rx_closed() {
+                    TrySendError::Closed(error::Closed(()))
+                } else {
+                    self.inner.rx_wait.notify();
+                    TrySendError::AtCapacity(e)
+                }
+            })
     }
 
     pub fn try_send(&self, val: T) -> Result<(), TrySendError> {
-        self.inner
-            .thingbuf
-            .push_ref()
-            .map_err(TrySendError::AtCapacity)?
-            .with_mut(|slot| {
-                *slot = val;
-            });
+        self.try_send_ref()?.with_mut(|slot| {
+            *slot = val;
+        });
         Ok(())
     }
 }
@@ -125,6 +122,15 @@ impl<T: Default> Receiver<T> {
         }
     }
 
+    pub fn try_recv_ref(&self) -> Option<Ref<'_, T>> {
+        self.inner.thingbuf.pop_ref()
+    }
+
+    pub fn recv(&self) -> Option<T> {
+        let val = self.recv_ref()?.with_mut(core::mem::take);
+        Some(val)
+    }
+
     pub fn is_closed(&self) -> bool {
         test_dbg!(self.inner.tx_count.load(Ordering::SeqCst)) <= 1
     }
@@ -135,6 +141,12 @@ impl<'a, T: Default> Iterator for &'a Receiver<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.recv_ref()
+    }
+}
+
+impl<T> Drop for Receiver<T> {
+    fn drop(&mut self) {
+        self.inner.rx_wait.close_rx();
     }
 }
 

@@ -5,6 +5,7 @@ use core::{fmt, mem::MaybeUninit, ops::Index};
 #[macro_use]
 mod macros;
 
+pub mod error;
 mod loom;
 mod util;
 mod wait;
@@ -29,6 +30,7 @@ mod static_thingbuf;
 pub use self::static_thingbuf::StaticThingBuf;
 
 use crate::{
+    error::AtCapacity,
     loom::{
         atomic::{AtomicUsize, Ordering},
         UnsafeCell,
@@ -50,9 +52,6 @@ pub struct Ref<'slot, T> {
     slot: &'slot Slot<T>,
     new_state: usize,
 }
-
-#[derive(Debug)]
-pub struct AtCapacity(usize);
 
 pub struct Slot<T> {
     value: UnsafeCell<MaybeUninit<T>>,

@@ -1,5 +1,5 @@
 use crate::loom::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicUsize, Ordering::*},
     UnsafeCell,
 };
 
@@ -30,6 +30,7 @@ impl<T: Notify> WaitCell<T> {
     const PARKING: usize = 0b01;
     const NOTIFYING: usize = 0b10;
     const TX_CLOSED: usize = 0b100;
+    const RX_CLOSED: usize = 0b1000;
 
     pub(crate) fn new() -> Self {
         Self {
@@ -38,16 +39,22 @@ impl<T: Notify> WaitCell<T> {
         }
     }
 
+    pub(crate) fn close_rx(&self) {
+        self.lock.fetch_or(Self::RX_CLOSED, AcqRel);
+    }
+
+    pub(crate) fn is_rx_closed(&self) -> bool {
+        test_dbg!(self.lock.load(Acquire) & Self::RX_CLOSED == Self::RX_CLOSED)
+    }
+
     pub(crate) fn wait_with(&self, f: impl FnOnce() -> T) -> WaitResult {
         test_println!("registering waiter");
 
         // this is based on tokio's AtomicWaker synchronization strategy
-        match test_dbg!(self.lock.compare_exchange(
-            Self::WAITING,
-            Self::PARKING,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        )) {
+        match test_dbg!(self
+            .lock
+            .compare_exchange(Self::WAITING, Self::PARKING, AcqRel, Acquire,))
+        {
             // someone else is notifying the receiver, so don't park!
             Err(actual) if test_dbg!(actual & Self::TX_CLOSED) == Self::TX_CLOSED => {
                 test_println!("-> state = TX_CLOSED");
@@ -70,12 +77,10 @@ impl<T: Notify> WaitCell<T> {
             .waiter
             .with_mut(|waiter| unsafe { (*waiter).replace(f()) });
 
-        match self.lock.compare_exchange(
-            Self::PARKING,
-            Self::WAITING,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
+        match self
+            .lock
+            .compare_exchange(Self::PARKING, Self::WAITING, AcqRel, Acquire)
+        {
             Ok(_) => WaitResult::Wait,
             Err(actual) => {
                 test_println!("-> was notified; state={:#b}", actual);
@@ -110,22 +115,13 @@ impl<T: Notify> WaitCell<T> {
         } else {
             Self::NOTIFYING
         };
-        match test_dbg!(self.lock.fetch_or(bits, Ordering::AcqRel)) {
-            Self::WAITING => {
-                // we have the lock!
-                let waiter = self.waiter.with_mut(|thread| unsafe { (*thread).take() });
-                self.lock.fetch_and(!Self::NOTIFYING, Ordering::Release);
+        if test_dbg!(self.lock.fetch_or(bits, AcqRel)) == Self::WAITING {
+            // we have the lock!
+            let waiter = self.waiter.with_mut(|thread| unsafe { (*thread).take() });
+            self.lock.fetch_and(!Self::NOTIFYING, Release);
 
-                if let Some(waiter) = waiter {
-                    waiter.notify();
-                }
-            }
-            actual => {
-                debug_assert!(
-                    actual == Self::PARKING
-                        || actual == Self::PARKING | Self::NOTIFYING
-                        || actual == Self::NOTIFYING
-                )
+            if let Some(waiter) = waiter {
+                waiter.notify();
             }
         }
     }
