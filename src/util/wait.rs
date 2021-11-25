@@ -119,13 +119,17 @@ impl<T: Notify + UnwindSafe + fmt::Debug> WaitCell<T> {
             }
             Err(actual) => {
                 test_println!("-> was notified; state={:#b}", actual);
-                // debug_assert_eq!(actual, Self::PARKING | Self::NOTIFYING);
                 let waiter = self.waiter.with_mut(|waiter| unsafe { (*waiter).take() });
-
-                let did_reset = test_dbg!(self.lock.swap(Self::WAITING, AcqRel));
-                debug_assert_eq!(
-                    did_reset, actual,
-                    "someone changed the state while `lock == PARKING | NOTIFYING`; this shouldn't be possible!"
+                // Reset to the WAITING state by clearing everything *except*
+                // the closed bits (which must remain set).
+                let state = test_dbg!(self
+                    .lock
+                    .fetch_and(Self::TX_CLOSED | Self::RX_CLOSED, AcqRel));
+                // The only valid state transition while we were parking is to
+                // add the TX_CLOSED bit.
+                debug_assert!(
+                    state == actual || state == actual | Self::TX_CLOSED,
+                    "state changed unexpectedly while parking!"
                 );
 
                 if let Some(prev_waiter) = prev_waiter {
@@ -139,7 +143,7 @@ impl<T: Notify + UnwindSafe + fmt::Debug> WaitCell<T> {
                     waiter.notify();
                 }
 
-                if actual & Self::TX_CLOSED == Self::TX_CLOSED {
+                if state & Self::TX_CLOSED == Self::TX_CLOSED {
                     WaitResult::TxClosed
                 } else {
                     WaitResult::Notified
@@ -227,7 +231,7 @@ mod tests {
                 return Poll::Ready(());
             }
 
-            if res == WaitResult::Notified {
+            if res == WaitResult::Notified || res == WaitResult::TxClosed {
                 return Poll::Ready(());
             }
 
@@ -253,6 +257,35 @@ mod tests {
                     chan.task.notify();
                 });
             }
+
+            future::block_on(wait_on(chan));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn tx_close() {
+        loom::model(|| {
+            let chan = Arc::new(Chan {
+                num: AtomicUsize::new(0),
+                task: WaitCell::new(),
+            });
+
+            thread::spawn({
+                let chan = chan.clone();
+                move || {
+                    chan.num.fetch_add(1, Relaxed);
+                    chan.task.notify();
+                }
+            });
+
+            thread::spawn({
+                let chan = chan.clone();
+                move || {
+                    chan.num.fetch_add(1, Relaxed);
+                    chan.task.close_tx();
+                }
+            });
 
             future::block_on(wait_on(chan));
         });
