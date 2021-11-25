@@ -1,3 +1,8 @@
+//! A synchronous multi-producer, single-consumer channel.
+//!
+//! This provides an equivalent API to the [`mpsc`](crate::mpsc) module, but the
+//! [`Receiver`] type in this module waits by blocking the current thread,
+//! rather than asynchronously yielding.
 use super::{Closed, TrySendError};
 use crate::{
     loom::{
@@ -11,6 +16,7 @@ use crate::{
 };
 use core::fmt;
 
+/// Returns a new asynchronous multi-producer, single consumer channel.
 pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
     let inner = Arc::new(Inner {
         thingbuf,

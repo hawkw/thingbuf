@@ -15,6 +15,7 @@ use core::{
     task::{Context, Poll, Waker},
 };
 
+/// Returns a new synchronous multi-producer, single consumer channel.
 pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
     let inner = Arc::new(Inner {
         thingbuf,
@@ -139,7 +140,7 @@ impl<T: Default> Receiver<T> {
     /// When the method returns [`Poll::Pending`], the [`Waker`] in the provided
     /// [`Context`] is scheduled to receive a wakeup when a message is sent on any
     /// sender, or when the channel is closed.  Note that on multiple calls to
-    /// [`poll_recv_ref`], only the [`Waker`] from the [`Context`] passed to the most
+    /// `poll_recv_ref`, only the [`Waker`] from the [`Context`] passed to the most
     /// recent call is scheduled to receive a wakeup.
     pub fn poll_recv_ref(&self, cx: &mut Context<'_>) -> Poll<Option<Ref<'_, T>>> {
         loop {
@@ -185,7 +186,7 @@ impl<T: Default> Receiver<T> {
     /// When the method returns [`Poll::Pending`], the [`Waker`] in the provided
     /// [`Context`] is scheduled to receive a wakeup when a message is sent on any
     /// sender, or when the channel is closed.  Note that on multiple calls to
-    /// [`poll_recv_ref`], only the [`Waker`] from the [`Context`] passed to the most
+    /// `poll_recv`, only the [`Waker`] from the [`Context`] passed to the most
     /// recent call is scheduled to receive a wakeup.
     pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         self.poll_recv_ref(cx)
