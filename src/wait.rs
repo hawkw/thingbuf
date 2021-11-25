@@ -132,6 +132,8 @@ impl Notify for thread::Thread {
     fn notify(self) {
         test_println!("NOTIFYING {:?} (from {:?})", self, thread::current());
         self.unpark();
-        thread::yield_now();
+        // XXX(eliza): loom doesn't like the yield_now here because the unpark
+        // may *immediately* switch execution to the unparked thread, lol.
+        // thread::yield_now();
     }
 }
