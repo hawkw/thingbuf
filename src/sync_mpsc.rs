@@ -6,7 +6,7 @@ use crate::{
         sync::Arc,
         thread::{self, Thread},
     },
-    wait::{WaitCell, WaitResult},
+    util::wait::{WaitCell, WaitResult},
 };
 
 #[cfg(test)]

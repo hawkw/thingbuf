@@ -8,7 +8,6 @@ mod macros;
 pub mod error;
 mod loom;
 mod util;
-mod wait;
 
 feature! {
     #![feature = "alloc"]
@@ -19,6 +18,10 @@ feature! {
 
     mod stringbuf;
     pub use stringbuf::{StaticStringBuf, StringBuf};
+
+    pub mod async_mpsc;
+    #[doc(inline)]
+    pub use async_mpsc::async_mpsc;
 }
 
 feature! {
