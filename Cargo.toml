@@ -21,4 +21,4 @@ futures-util = "0.3"
 opt-level = 3
 
 [patch.crates-io]
-loom = { git = "https://github.com/tokio-rs/loom", branch = "eliza/thread-park"}
+loom = { git = "https://github.com/tokio-rs/loom", branch = "master"}
