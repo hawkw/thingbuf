@@ -12,7 +12,7 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-pub fn sync_mpsc<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
+pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
     let inner = Arc::new(Inner {
         thingbuf,
         rx_wait: WaitCell::new(),

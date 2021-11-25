@@ -1,5 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-
+#![cfg_attr(docsrs, feature(doc_cfg))]
 use core::{fmt, mem::MaybeUninit, ops::Index};
 
 #[macro_use]
@@ -20,15 +20,11 @@ feature! {
     pub use stringbuf::{StaticStringBuf, StringBuf};
 
     pub mod async_mpsc;
-    #[doc(inline)]
-    pub use async_mpsc::async_mpsc;
 }
 
 feature! {
     #![feature = "std"]
     pub mod sync_mpsc;
-    #[doc(inline)]
-    pub use sync_mpsc::sync_mpsc;
 }
 
 mod static_thingbuf;

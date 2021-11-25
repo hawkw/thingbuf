@@ -7,7 +7,7 @@ use crate::{
 #[test]
 fn basically_works() {
     loom::model(|| {
-        let (tx, rx) = async_mpsc(ThingBuf::new(4));
+        let (tx, rx) = channel(ThingBuf::new(4));
 
         let p1 = {
             let tx = tx.clone();
@@ -41,7 +41,7 @@ fn basically_works() {
 fn rx_closes() {
     const ITERATIONS: usize = 6;
     loom::model(|| {
-        let (tx, rx) = async_mpsc(ThingBuf::new(ITERATIONS / 2));
+        let (tx, rx) = channel(ThingBuf::new(ITERATIONS / 2));
 
         let producer = thread::spawn(move || {
             'iters: for i in 0..=ITERATIONS {
@@ -74,7 +74,7 @@ fn rx_closes() {
 #[test]
 fn spsc_recv_then_send() {
     loom::model(|| {
-        let (tx, rx) = async_mpsc(ThingBuf::<i32>::new(4));
+        let (tx, rx) = channel(ThingBuf::<i32>::new(4));
         let consumer = thread::spawn(move || {
             future::block_on(async move {
                 assert_eq!(rx.recv().await.unwrap(), 10);
@@ -89,7 +89,7 @@ fn spsc_recv_then_send() {
 #[test]
 fn spsc_recv_then_close() {
     loom::model(|| {
-        let (tx, rx) = async_mpsc(ThingBuf::<i32>::new(4));
+        let (tx, rx) = channel(ThingBuf::<i32>::new(4));
         let producer = thread::spawn(move || {
             drop(tx);
         });
@@ -106,7 +106,7 @@ fn spsc_recv_then_close() {
 #[test]
 fn spsc_recv_then_send_then_close() {
     loom::model(|| {
-        let (tx, rx) = async_mpsc(ThingBuf::<i32>::new(2));
+        let (tx, rx) = channel(ThingBuf::<i32>::new(2));
         let consumer = thread::spawn(move || {
             future::block_on(async move {
                 assert_eq!(rx.recv().await.unwrap(), 10);
