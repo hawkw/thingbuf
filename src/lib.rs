@@ -5,7 +5,6 @@ use core::{fmt, mem::MaybeUninit, ops::Index};
 #[macro_use]
 mod macros;
 
-pub mod error;
 mod loom;
 mod util;
 
@@ -19,25 +18,27 @@ feature! {
     mod stringbuf;
     pub use stringbuf::{StaticStringBuf, StringBuf};
 
-    pub mod async_mpsc;
-}
-
-feature! {
-    #![feature = "std"]
-    pub mod sync_mpsc;
+    pub mod mpsc;
 }
 
 mod static_thingbuf;
 pub use self::static_thingbuf::StaticThingBuf;
 
 use crate::{
-    error::AtCapacity,
     loom::{
         atomic::{AtomicUsize, Ordering},
         UnsafeCell,
     },
     util::{Backoff, CachePadded},
 };
+
+pub struct Ref<'slot, T> {
+    slot: &'slot Slot<T>,
+    new_state: usize,
+}
+
+#[derive(Debug)]
+pub struct AtCapacity(pub(crate) usize);
 
 #[derive(Debug)]
 struct Core {
@@ -49,12 +50,7 @@ struct Core {
     capacity: usize,
 }
 
-pub struct Ref<'slot, T> {
-    slot: &'slot Slot<T>,
-    new_state: usize,
-}
-
-pub struct Slot<T> {
+struct Slot<T> {
     value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicUsize,
 }

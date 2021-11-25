@@ -1,20 +1,15 @@
-use super::*;
+use super::{Closed, TrySendError};
 use crate::{
-    error::TrySendError,
     loom::{
+        self,
         atomic::{AtomicUsize, Ordering},
         sync::Arc,
+        thread::{self, Thread},
     },
     util::wait::{WaitCell, WaitResult},
+    Ref, ThingBuf,
 };
-use core::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll, Waker},
-};
-
-#[cfg(test)]
-mod tests;
+use core::fmt;
 
 pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
     let inner = Arc::new(Inner {
@@ -42,29 +37,9 @@ pub struct SendRef<'a, T> {
     slot: Ref<'a, T>,
 }
 
-/// A [`Future`] that tries to receive a reference from a [`Receiver`].
-///
-/// This type is returned by [`Receiver::recv_ref`].
-#[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct RecvRef<'a, T> {
-    rx: &'a Receiver<T>,
-}
-
-/// A [`Future`] that tries to receive a value from a [`Receiver`].
-///
-/// This type is returned by [`Receiver::recv`].
-///
-/// This is equivalent to the [`RecvRef`] future, but the value is moved out of
-/// the [`ThingBuf`] after it is received. This means that allocations are not
-/// reused.
-#[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Recv<'a, T> {
-    rx: &'a Receiver<T>,
-}
-
 struct Inner<T> {
     thingbuf: ThingBuf<T>,
-    rx_wait: WaitCell<Waker>,
+    rx_wait: WaitCell<Thread>,
     tx_count: AtomicUsize,
 }
 
@@ -81,7 +56,7 @@ impl<T: Default> Sender<T> {
             })
             .map_err(|e| {
                 if self.inner.rx_wait.is_rx_closed() {
-                    TrySendError::Closed(error::Closed(()))
+                    TrySendError::Closed(Closed(()))
                 } else {
                     self.inner.rx_wait.notify();
                     TrySendError::AtCapacity(e)
@@ -121,40 +96,19 @@ impl<T> Drop for Sender<T> {
 // === impl Receiver ===
 
 impl<T: Default> Receiver<T> {
-    pub fn recv_ref(&self) -> RecvRef<'_, T> {
-        RecvRef { rx: self }
-    }
-
-    pub fn recv(&self) -> Recv<'_, T> {
-        Recv { rx: self }
-    }
-
-    /// # Returns
-    ///
-    ///  * `Poll::Pending` if no messages are available but the channel is not
-    ///    closed, or if a spurious failure happens.
-    ///  * `Poll::Ready(Some(Ref<T>))` if a message is available.
-    ///  * `Poll::Ready(None)` if the channel has been closed and all messages
-    ///    sent before it was closed have been received.
-    ///
-    /// When the method returns [`Poll::Pending`], the [`Waker`] in the provided
-    /// [`Context`] is scheduled to receive a wakeup when a message is sent on any
-    /// sender, or when the channel is closed.  Note that on multiple calls to
-    /// [`poll_recv_ref`], only the [`Waker`] from the [`Context`] passed to the most
-    /// recent call is scheduled to receive a wakeup.
-    pub fn poll_recv_ref(&self, cx: &mut Context<'_>) -> Poll<Option<Ref<'_, T>>> {
+    pub fn recv_ref(&self) -> Option<Ref<'_, T>> {
         loop {
-            if let Some(r) = self.try_recv_ref() {
-                return Poll::Ready(Some(r));
+            // If we got a value, return it!
+            if let Some(r) = self.inner.thingbuf.pop_ref() {
+                return Some(r);
             }
 
-            // Okay, no value is ready --- try to wait.
-            match test_dbg!(self.inner.rx_wait.wait_with(|| cx.waker().clone())) {
+            // otherwise, gotosleep
+            match test_dbg!(self.inner.rx_wait.wait_with(thread::current)) {
                 WaitResult::TxClosed => {
                     // All senders have been dropped, but the channel might
-                    // still have messages in it. Return `Ready`; if the recv'd ref
-                    // is `None` then we've popped everything.
-                    return Poll::Ready(self.try_recv_ref());
+                    // still have messages in it...
+                    return self.inner.thingbuf.pop_ref();
                 }
                 WaitResult::Wait => {
                     // make sure nobody sent a message while we were registering
@@ -163,42 +117,38 @@ impl<T: Default> Receiver<T> {
                     // waiter state into the tail idx or something or something
                     // but that kind of defeats the purpose of just having a
                     // nice "wrap a queue into a channel" API...
-                    if let Some(val) = self.try_recv_ref() {
-                        return Poll::Ready(Some(val));
+                    if let Some(val) = self.inner.thingbuf.pop_ref() {
+                        return Some(val);
                     }
-                    return Poll::Pending;
+                    test_println!("parking ({:?})", thread::current());
+                    thread::park();
                 }
                 WaitResult::Notified => {
                     loom::hint::spin_loop();
                 }
-            };
+            }
         }
     }
 
-    /// # Returns
-    ///
-    ///  * `Poll::Pending` if no messages are available but the channel is not
-    ///    closed, or if a spurious failure happens.
-    ///  * `Poll::Ready(Some(message))` if a message is available.
-    ///  * `Poll::Ready(None)` if the channel has been closed and all messages
-    ///    sent before it was closed have been received.
-    ///
-    /// When the method returns [`Poll::Pending`], the [`Waker`] in the provided
-    /// [`Context`] is scheduled to receive a wakeup when a message is sent on any
-    /// sender, or when the channel is closed.  Note that on multiple calls to
-    /// [`poll_recv_ref`], only the [`Waker`] from the [`Context`] passed to the most
-    /// recent call is scheduled to receive a wakeup.
-    pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Option<T>> {
-        self.poll_recv_ref(cx)
-            .map(|opt| opt.map(|mut r| r.with_mut(core::mem::take)))
+    pub fn try_recv_ref(&self) -> Option<Ref<'_, T>> {
+        self.inner.thingbuf.pop_ref()
     }
 
-    fn try_recv_ref(&self) -> Option<Ref<'_, T>> {
-        self.inner.thingbuf.pop_ref()
+    pub fn recv(&self) -> Option<T> {
+        let val = self.recv_ref()?.with_mut(core::mem::take);
+        Some(val)
     }
 
     pub fn is_closed(&self) -> bool {
         test_dbg!(self.inner.tx_count.load(Ordering::SeqCst)) <= 1
+    }
+}
+
+impl<'a, T: Default> Iterator for &'a Receiver<T> {
+    type Item = Ref<'a, T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.recv_ref()
     }
 }
 
@@ -225,7 +175,7 @@ impl<T> SendRef<'_, T> {
 impl<T> Drop for SendRef<'_, T> {
     #[inline]
     fn drop(&mut self) {
-        test_println!("drop async SendRef");
+        test_println!("drop SendRef");
         self.inner.rx_wait.notify();
     }
 }
@@ -256,25 +206,5 @@ impl<T: fmt::Write> fmt::Write for SendRef<'_, T> {
     #[inline]
     fn write_fmt(&mut self, f: fmt::Arguments<'_>) -> fmt::Result {
         self.with_mut(|val| val.write_fmt(f))
-    }
-}
-
-// === impl RecvRef ===
-
-impl<'a, T: Default> Future for RecvRef<'a, T> {
-    type Output = Option<Ref<'a, T>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.rx.poll_recv_ref(cx)
-    }
-}
-
-// === impl Recv ===
-
-impl<'a, T: Default> Future for Recv<'a, T> {
-    type Output = Option<T>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.rx.poll_recv(cx)
     }
 }
