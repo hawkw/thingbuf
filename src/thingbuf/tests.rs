@@ -55,6 +55,41 @@ fn push_many_mpsc() {
 }
 
 #[test]
+fn spsc() {
+    const COUNT: usize = 9;
+    loom::model(|| {
+        let q = Arc::new(ThingBuf::new(3));
+
+        let producer = {
+            let q = q.clone();
+            thread::spawn(move || {
+                for i in 0..COUNT {
+                    loop {
+                        if let Ok(mut guard) = q.push_ref() {
+                            guard.with_mut(|val| *val = i);
+                            break;
+                        }
+                        thread::yield_now();
+                    }
+                }
+            })
+        };
+
+        for i in 0..COUNT {
+            loop {
+                if let Some(guard) = q.pop_ref() {
+                    guard.with(|val| assert_eq!(*val, i));
+                    break;
+                }
+                thread::yield_now();
+            }
+        }
+
+        producer.join().unwrap();
+    });
+}
+
+#[test]
 #[ignore] // this takes about a million years to run
 fn linearizable() {
     const THREADS: usize = 4;

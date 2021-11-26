@@ -1,6 +1,9 @@
 use crate::loom;
 use core::ops::{Deref, DerefMut};
 
+pub(crate) mod panic;
+pub(crate) mod wait;
+
 #[derive(Debug)]
 pub(crate) struct Backoff(u8);
 
@@ -11,16 +14,6 @@ pub(crate) struct Backoff(u8);
 )]
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq, Debug)]
 pub(crate) struct CachePadded<T>(pub(crate) T);
-
-#[cfg(feature = "std")]
-pub(crate) fn panicking() -> bool {
-    std::thread::panicking()
-}
-
-#[cfg(not(feature = "std"))]
-pub(crate) fn panicking() -> bool {
-    false
-}
 
 // === impl Backoff ===
 
@@ -36,8 +29,6 @@ impl Backoff {
     pub(crate) fn spin(&mut self) {
         for _ in 0..test_dbg!(1 << self.0.min(Self::MAX_SPINS)) {
             loom::hint::spin_loop();
-
-            test_println!("spin_loop_hint");
         }
 
         if self.0 <= Self::MAX_SPINS {
@@ -50,7 +41,6 @@ impl Backoff {
         if self.0 <= Self::MAX_SPINS || cfg!(not(any(feature = "std", test))) {
             for _ in 0..1 << self.0 {
                 loom::hint::spin_loop();
-                test_println!("spin_loop_hint");
             }
         }
 

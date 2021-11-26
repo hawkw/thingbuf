@@ -1,48 +1,25 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-
+#![cfg_attr(docsrs, feature(doc_cfg))]
 use core::{fmt, mem::MaybeUninit, ops::Index};
 
-#[cfg(feature = "alloc")]
-extern crate alloc;
-
-macro_rules! test_println {
-    ($($arg:tt)*) => {
-        if cfg!(test) {
-            if crate::util::panicking() {
-                // getting the thread ID while panicking doesn't seem to play super nicely with loom's
-                // mock lazy_static...
-                println!("[PANIC {:>17}:{:<3}] {}", file!(), line!(), format_args!($($arg)*))
-            } else {
-                println!("[{:?} {:>17}:{:<3}] {}", crate::loom::thread::current().id(), file!(), line!(), format_args!($($arg)*))
-            }
-        }
-    }
-}
-
-macro_rules! test_dbg {
-    ($e:expr) => {
-        match $e {
-            e => {
-                #[cfg(test)]
-                test_println!("{} = {:?}", stringify!($e), &e);
-                e
-            }
-        }
-    };
-}
+#[macro_use]
+mod macros;
 
 mod loom;
 mod util;
 
-#[cfg(feature = "alloc")]
-mod thingbuf;
-#[cfg(feature = "alloc")]
-pub use self::thingbuf::ThingBuf;
-#[cfg(feature = "alloc")]
-mod stringbuf;
+feature! {
+    #![feature = "alloc"]
+    extern crate alloc;
 
-#[cfg(feature = "alloc")]
-pub use stringbuf::{StaticStringBuf, StringBuf};
+    mod thingbuf;
+    pub use self::thingbuf::ThingBuf;
+
+    mod stringbuf;
+    pub use stringbuf::{StaticStringBuf, StringBuf};
+
+    pub mod mpsc;
+}
 
 mod static_thingbuf;
 pub use self::static_thingbuf::StaticThingBuf;
@@ -55,6 +32,14 @@ use crate::{
     util::{Backoff, CachePadded},
 };
 
+pub struct Ref<'slot, T> {
+    slot: &'slot Slot<T>,
+    new_state: usize,
+}
+
+#[derive(Debug)]
+pub struct AtCapacity(pub(crate) usize);
+
 #[derive(Debug)]
 struct Core {
     head: CachePadded<AtomicUsize>,
@@ -65,15 +50,7 @@ struct Core {
     capacity: usize,
 }
 
-pub struct Ref<'slot, T> {
-    slot: &'slot Slot<T>,
-    new_state: usize,
-}
-
-#[derive(Debug)]
-pub struct AtCapacity(usize);
-
-pub struct Slot<T> {
+struct Slot<T> {
     value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicUsize,
 }

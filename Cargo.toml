@@ -13,4 +13,12 @@ default = ["std"]
 [dependencies]
 
 [dev-dependencies]
-loom = "0.5"
+loom = { version = "0.5", features = ["checkpoint", "futures"] }
+# So that we can use `poll_fn` in tests.
+futures-util = "0.3"
+
+[profile.test]
+opt-level = 3
+
+[patch.crates-io]
+loom = { git = "https://github.com/tokio-rs/loom", branch = "master"}

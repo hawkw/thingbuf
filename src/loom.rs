@@ -6,7 +6,7 @@ mod inner {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
-    pub(crate) use loom::{cell::UnsafeCell, hint, thread};
+    pub(crate) use loom::{cell::UnsafeCell, future, hint, sync, thread};
 
     pub(crate) fn model(f: impl Fn() + Sync + Send + 'static) {
         let iteration = core::sync::atomic::AtomicUsize::new(0);
@@ -72,6 +72,13 @@ mod inner {
 #[cfg(not(test))]
 mod inner {
     #![allow(dead_code)]
+    pub(crate) mod sync {
+        pub use core::sync::*;
+
+        #[cfg(feature = "alloc")]
+        pub use alloc::sync::*;
+    }
+
     pub(crate) use core::sync::atomic;
 
     #[cfg(feature = "std")]
