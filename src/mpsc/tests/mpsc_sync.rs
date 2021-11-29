@@ -112,10 +112,12 @@ fn spsc_recv_then_send_then_close() {
 
 #[test]
 fn tx_close_wakes() {
-    let (tx, rx) = sync::channel(ThingBuf::<i32>::new(2));
-    let consumer = thread::spawn(move || {
-        assert_eq!(rx.recv(), None);
+    loom::model(|| {
+        let (tx, rx) = sync::channel(ThingBuf::<i32>::new(2));
+        let consumer = thread::spawn(move || {
+            assert_eq!(rx.recv(), None);
+        });
+        drop(tx);
+        consumer.join().unwrap();
     });
-    drop(tx);
-    consumer.join().unwrap();
 }
