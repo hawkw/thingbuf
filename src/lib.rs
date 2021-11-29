@@ -244,7 +244,7 @@ impl Core {
                 let (head_idx, _) = self.idx_gen(head);
                 let (tail_idx, _) = self.idx_gen(tail);
                 return match head_idx.cmp(&tail_idx) {
-                    cmp::Ordering::Less => head_idx - tail_idx,
+                    cmp::Ordering::Less => tail_idx - head_idx,
                     cmp::Ordering::Greater => self.capacity - head_idx + tail_idx,
                     _ if tail == head => 0,
                     _ => self.capacity,
