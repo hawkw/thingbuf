@@ -15,10 +15,12 @@ default = ["std"]
 [dev-dependencies]
 loom = { version = "0.5", features = ["checkpoint", "futures"] }
 # So that we can use `poll_fn` in tests.
-futures-util = "0.3"
-criterion = "0.3.5"
+futures = "0.3"
+criterion = { version = "0.3.5", features = ["async_tokio"] }
 # for comparison benchmarks
 crossbeam = "0.8.1"
+tokio = { version = "1.14.0", features = ["rt", "sync"] }
+async-std = "1"
 
 [profile.test]
 opt-level = 3
@@ -28,4 +30,8 @@ loom = { git = "https://github.com/tokio-rs/loom", branch = "master"}
 
 [[bench]]
 name = "sync_mpsc"
+harness = false
+
+[[bench]]
+name = "async_mpsc"
 harness = false
