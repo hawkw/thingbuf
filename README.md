@@ -32,5 +32,6 @@
 
   **A:** [Blame `loom` for this.](https://github.com/tokio-rs/loom/pull/219)
   
- - **Q: Why do the channels only have `try_send`? Where's `send`? 
+ - **Q: Why do the channels only have `try_send`? Where's `send`?**
+ 
    **A:** I haven't written `send` yet. :)
