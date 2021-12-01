@@ -203,6 +203,8 @@ impl Notify for Waker {
 
 impl<T: UnwindSafe> UnwindSafe for WaitCell<T> {}
 impl<T: RefUnwindSafe> RefUnwindSafe for WaitCell<T> {}
+unsafe impl<T: Send> Send for WaitCell<T> {}
+unsafe impl<T: Send> Sync for WaitCell<T> {}
 
 #[cfg(test)]
 mod tests {
