@@ -1,11 +1,7 @@
 use super::*;
 use crate::{
-    loom::{
-        self,
-        atomic::{AtomicUsize, Ordering},
-        sync::Arc,
-    },
-    util::wait::{WaitCell, WaitResult},
+    loom::{self, atomic::Ordering, sync::Arc},
+    util::wait::WaitResult,
     Ref, ThingBuf,
 };
 use core::{
@@ -17,11 +13,7 @@ use core::{
 
 /// Returns a new synchronous multi-producer, single consumer channel.
 pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
-    let inner = Arc::new(Inner {
-        thingbuf,
-        rx_wait: WaitCell::new(),
-        tx_count: AtomicUsize::new(1),
-    });
+    let inner = Arc::new(Inner::new(thingbuf));
     let tx = Sender {
         inner: inner.clone(),
     };

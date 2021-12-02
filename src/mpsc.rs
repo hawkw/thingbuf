@@ -17,6 +17,9 @@ use crate::{
 };
 use core::fmt;
 
+#[cfg(feature = "alloc")]
+use crate::util::wait::WaitQueue;
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum TrySendError<T = ()> {
@@ -25,10 +28,15 @@ pub enum TrySendError<T = ()> {
 }
 
 #[derive(Debug)]
-struct Inner<T, N> {
+pub struct Closed<T = ()>(T);
+
+#[derive(Debug)]
+struct Inner<T, N: Notify> {
     thingbuf: ThingBuf<T>,
     rx_wait: WaitCell<N>,
     tx_count: AtomicUsize,
+    #[cfg(feature = "alloc")]
+    tx_wait: WaitQueue<N>,
 }
 
 struct SendRefInner<'a, T, N: Notify> {
@@ -48,6 +56,29 @@ impl TrySendError {
 }
 
 // ==== impl Inner ====
+impl<T, N: Notify> Inner<T, N> {
+    #[cfg(not(test))]
+    const fn new(thingbuf: ThingBuf<T>) -> Self {
+        Self {
+            thingbuf,
+            rx_wait: WaitCell::new(),
+            tx_count: AtomicUsize::new(1),
+            #[cfg(feature = "alloc")]
+            tx_wait: WaitQueue::new(),
+        }
+    }
+
+    #[cfg(test)]
+    fn new(thingbuf: ThingBuf<T>) -> Self {
+        Self {
+            thingbuf,
+            rx_wait: WaitCell::new(),
+            tx_count: AtomicUsize::new(1),
+            #[cfg(feature = "alloc")]
+            tx_wait: WaitQueue::new(),
+        }
+    }
+}
 
 impl<T: Default, N: Notify> Inner<T, N> {
     fn try_send_ref(&self) -> Result<SendRefInner<'_, T, N>, TrySendError> {
@@ -166,6 +197,65 @@ macro_rules! impl_send_ref {
             #[inline]
             fn write_fmt(&mut self, f: fmt::Arguments<'_>) -> fmt::Result {
                 self.0.write_fmt(f)
+            }
+        }
+    };
+}
+
+macro_rules! impl_recv_ref {
+    (pub struct $name:ident<$notify:ty>;) => {
+        pub struct $name<'recv, T> {
+            slot: Ref<'recv, T>,
+            inner: &'recv Inner<T, $notify>,
+        }
+
+        impl<T> $name<'_, T> {
+            #[inline]
+            pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
+                self.slot.with(f)
+            }
+
+            #[inline]
+            pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
+                self.slot.with_mut(f)
+            }
+        }
+
+        impl<T: fmt::Debug> fmt::Debug for $name<'_, T> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.slot.fmt(f)
+            }
+        }
+
+        impl<T: fmt::Display> fmt::Display for $name<'_, T> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.slot.fmt(f)
+            }
+        }
+
+        impl<T: fmt::Write> fmt::Write for $name<'_, T> {
+            #[inline]
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                self.slot.write_str(s)
+            }
+
+            #[inline]
+            fn write_char(&mut self, c: char) -> fmt::Result {
+                self.slot.write_char(c)
+            }
+
+            #[inline]
+            fn write_fmt(&mut self, f: fmt::Arguments<'_>) -> fmt::Result {
+                self.slot.write_fmt(f)
+            }
+        }
+
+        impl<T> Drop for RecvRef<'_, T> {
+            fn drop(&mut self) {
+                test_println!("drop RecvRef<T, {}>", stringify!($notify));
+                if let Some(lock) = self.inner.tx_wait.lock() {
+                    lock.notify();
+                }
             }
         }
     };

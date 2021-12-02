@@ -7,22 +7,18 @@ use super::*;
 use crate::{
     loom::{
         self,
-        atomic::{AtomicUsize, Ordering},
+        atomic::Ordering,
         sync::Arc,
         thread::{self, Thread},
     },
-    util::wait::{WaitCell, WaitResult},
+    util::wait::WaitResult,
     Ref, ThingBuf,
 };
 use core::fmt;
 
 /// Returns a new asynchronous multi-producer, single consumer channel.
 pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
-    let inner = Arc::new(Inner {
-        thingbuf,
-        rx_wait: WaitCell::new(),
-        tx_count: AtomicUsize::new(1),
-    });
+    let inner = Arc::new(Inner::new(thingbuf));
     let tx = Sender {
         inner: inner.clone(),
     };
@@ -44,6 +40,10 @@ impl_send_ref! {
     pub struct SendRef<Thread>;
 }
 
+impl_recv_ref! {
+    pub struct RecvRef<Thread>;
+}
+
 // === impl Sender ===
 
 impl<T: Default> Sender<T> {
@@ -53,6 +53,25 @@ impl<T: Default> Sender<T> {
 
     pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
         self.inner.try_send(val)
+    }
+
+    pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
+        loop {
+            match self.try_send_ref() {
+                Ok(slot) => return Ok(slot),
+                Err(TrySendError::Closed(())) => return Err(Closed(())),
+                Err(_) => {}
+            }
+
+            if let Some(mut q) = self.inner.tx_wait.lock() {
+                let current = thread::current();
+                test_println!("parking sender ({:?})", current);
+                q.push_waiter(current);
+                thread::park();
+            } else {
+                return Err(Closed(()));
+            }
+        }
     }
 }
 
@@ -80,11 +99,14 @@ impl<T> Drop for Sender<T> {
 // === impl Receiver ===
 
 impl<T: Default> Receiver<T> {
-    pub fn recv_ref(&self) -> Option<Ref<'_, T>> {
+    pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
         loop {
             // If we got a value, return it!
-            if let Some(r) = self.inner.thingbuf.pop_ref() {
-                return Some(r);
+            if let Some(slot) = self.inner.thingbuf.pop_ref() {
+                return Some(RecvRef {
+                    slot,
+                    inner: &self.inner,
+                });
             }
 
             // otherwise, gotosleep
@@ -92,7 +114,10 @@ impl<T: Default> Receiver<T> {
                 WaitResult::TxClosed => {
                     // All senders have been dropped, but the channel might
                     // still have messages in it...
-                    return self.inner.thingbuf.pop_ref();
+                    return self.inner.thingbuf.pop_ref().map(|slot| RecvRef {
+                        slot,
+                        inner: &self.inner,
+                    });
                 }
                 WaitResult::Wait => {
                     // make sure nobody sent a message while we were registering
@@ -101,8 +126,11 @@ impl<T: Default> Receiver<T> {
                     // waiter state into the tail idx or something or something
                     // but that kind of defeats the purpose of just having a
                     // nice "wrap a queue into a channel" API...
-                    if let Some(val) = self.inner.thingbuf.pop_ref() {
-                        return Some(val);
+                    if let Some(slot) = self.inner.thingbuf.pop_ref() {
+                        return Some(RecvRef {
+                            slot,
+                            inner: &self.inner,
+                        });
                     }
                     test_println!("parking ({:?})", thread::current());
                     thread::park();
@@ -129,7 +157,7 @@ impl<T: Default> Receiver<T> {
 }
 
 impl<'a, T: Default> Iterator for &'a Receiver<T> {
-    type Item = Ref<'a, T>;
+    type Item = RecvRef<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.recv_ref()
