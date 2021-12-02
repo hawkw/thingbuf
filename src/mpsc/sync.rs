@@ -3,7 +3,7 @@
 //! This provides an equivalent API to the [`mpsc`](crate::mpsc) module, but the
 //! [`Receiver`] type in this module waits by blocking the current thread,
 //! rather than asynchronously yielding.
-use super::TrySendError;
+use super::*;
 use crate::{
     loom::{
         self,
@@ -32,55 +32,27 @@ pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
 
 #[derive(Debug)]
 pub struct Sender<T> {
-    inner: Arc<Inner<T>>,
+    inner: Arc<Inner<T, Thread>>,
 }
 
 #[derive(Debug)]
 pub struct Receiver<T> {
-    inner: Arc<Inner<T>>,
+    inner: Arc<Inner<T, Thread>>,
 }
 
-pub struct SendRef<'a, T> {
-    inner: &'a Inner<T>,
-    slot: Ref<'a, T>,
-}
-
-#[derive(Debug)]
-struct Inner<T> {
-    thingbuf: ThingBuf<T>,
-    rx_wait: WaitCell<Thread>,
-    tx_count: AtomicUsize,
+impl_send_ref! {
+    pub struct SendRef<Thread>;
 }
 
 // === impl Sender ===
 
 impl<T: Default> Sender<T> {
     pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
-        self.inner
-            .thingbuf
-            .push_ref()
-            .map(|slot| SendRef {
-                inner: &*self.inner,
-                slot,
-            })
-            .map_err(|_| {
-                if self.inner.rx_wait.is_rx_closed() {
-                    TrySendError::Closed(())
-                } else {
-                    self.inner.rx_wait.notify();
-                    TrySendError::Full(())
-                }
-            })
+        self.inner.try_send_ref().map(SendRef)
     }
 
     pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
-        match self.try_send_ref() {
-            Ok(mut slot) => {
-                slot.with_mut(|slot| *slot = val);
-                Ok(())
-            }
-            Err(e) => Err(e.with_value(val)),
-        }
+        self.inner.try_send(val)
     }
 }
 
@@ -167,56 +139,5 @@ impl<'a, T: Default> Iterator for &'a Receiver<T> {
 impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
         self.inner.rx_wait.close_rx();
-    }
-}
-
-// === impl SendRef ===
-
-impl<T> SendRef<'_, T> {
-    #[inline]
-    pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
-        self.slot.with(f)
-    }
-
-    #[inline]
-    pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
-        self.slot.with_mut(f)
-    }
-}
-
-impl<T> Drop for SendRef<'_, T> {
-    #[inline]
-    fn drop(&mut self) {
-        test_println!("drop SendRef");
-        self.inner.rx_wait.notify();
-    }
-}
-
-impl<T: fmt::Debug> fmt::Debug for SendRef<'_, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.with(|val| fmt::Debug::fmt(val, f))
-    }
-}
-
-impl<T: fmt::Display> fmt::Display for SendRef<'_, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.with(|val| fmt::Display::fmt(val, f))
-    }
-}
-
-impl<T: fmt::Write> fmt::Write for SendRef<'_, T> {
-    #[inline]
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.with_mut(|val| val.write_str(s))
-    }
-
-    #[inline]
-    fn write_char(&mut self, c: char) -> fmt::Result {
-        self.with_mut(|val| val.write_char(c))
-    }
-
-    #[inline]
-    fn write_fmt(&mut self, f: fmt::Arguments<'_>) -> fmt::Result {
-        self.with_mut(|val| val.write_fmt(f))
     }
 }

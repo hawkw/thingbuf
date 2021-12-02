@@ -42,7 +42,7 @@ pub(crate) enum WaitResult {
     TxClosed,
 }
 
-pub(crate) trait Notify {
+pub(crate) trait Notify: UnwindSafe + fmt::Debug {
     fn notify(self);
 }
 
@@ -51,7 +51,7 @@ struct State(usize);
 
 // === impl WaitCell ===
 
-impl<T: Notify + UnwindSafe + fmt::Debug> WaitCell<T> {
+impl<T: Notify> WaitCell<T> {
     pub(crate) fn new() -> Self {
         Self {
             lock: AtomicUsize::new(State::WAITING.0),
