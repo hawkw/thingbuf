@@ -1,5 +1,5 @@
 use crate::loom::atomic::Ordering;
-use crate::{AtCapacity, Core, Ref, Slot};
+use crate::{Core, Full, Ref, Slot};
 use core::{fmt, ptr};
 
 pub struct StaticThingBuf<T, const CAP: usize> {
@@ -39,12 +39,12 @@ impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
 }
 
 impl<T: Default, const CAP: usize> StaticThingBuf<T, CAP> {
-    pub fn push_ref(&self) -> Result<Ref<'_, T>, AtCapacity> {
+    pub fn push_ref(&self) -> Result<Ref<'_, T>, Full> {
         self.core.push_ref(&self.slots)
     }
 
     #[inline]
-    pub fn push_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Result<U, AtCapacity> {
+    pub fn push_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Result<U, Full> {
         self.push_ref().map(|mut r| r.with_mut(f))
     }
 

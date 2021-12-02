@@ -3,7 +3,7 @@
 //! This provides an equivalent API to the [`mpsc`](crate::mpsc) module, but the
 //! [`Receiver`] type in this module waits by blocking the current thread,
 //! rather than asynchronously yielding.
-use super::{Closed, TrySendError};
+use super::TrySendError;
 use crate::{
     loom::{
         self,
@@ -60,21 +60,24 @@ impl<T: Default> Sender<T> {
                 inner: &*self.inner,
                 slot,
             })
-            .map_err(|e| {
+            .map_err(|_| {
                 if self.inner.rx_wait.is_rx_closed() {
-                    TrySendError::Closed(Closed(()))
+                    TrySendError::Closed(())
                 } else {
                     self.inner.rx_wait.notify();
-                    TrySendError::AtCapacity(e)
+                    TrySendError::Full(())
                 }
             })
     }
 
-    pub fn try_send(&self, val: T) -> Result<(), TrySendError> {
-        self.try_send_ref()?.with_mut(|slot| {
-            *slot = val;
-        });
-        Ok(())
+    pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
+        match self.try_send_ref() {
+            Ok(mut slot) => {
+                slot.with_mut(|slot| *slot = val);
+                Ok(())
+            }
+            Err(e) => Err(e.with_value(val)),
+        }
     }
 }
 

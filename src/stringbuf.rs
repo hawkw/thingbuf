@@ -29,7 +29,7 @@ impl StringBuf {
     }
 
     #[inline]
-    pub fn write(&self) -> Result<Ref<'_, String>, AtCapacity> {
+    pub fn write(&self) -> Result<Ref<'_, String>, Full> {
         let mut string = self.inner.push_ref()?;
         string.with_mut(String::clear);
         Ok(string)
@@ -74,7 +74,7 @@ impl<const CAP: usize> StaticStringBuf<CAP> {
     }
 
     #[inline]
-    pub fn write(&self) -> Result<Ref<'_, String>, AtCapacity> {
+    pub fn write(&self) -> Result<Ref<'_, String>, Full> {
         let mut string = self.inner.push_ref()?;
         string.with_mut(String::clear);
         Ok(string)
