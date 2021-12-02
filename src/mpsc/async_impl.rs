@@ -65,6 +65,35 @@ impl<T: Default> Sender<T> {
     pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
         self.inner.try_send(val)
     }
+
+    pub async fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
+        // This future is private because if we replace the waiter queue thing with an
+        // intrusive list, we won't want to expose the future type publicly, for safety reasons.
+        struct SendRefFuture<'sender, T>(&'sender Sender<T>);
+        impl<'sender, T: Default + 'sender> Future for SendRefFuture<'sender, T> {
+            type Output = Result<SendRef<'sender, T>, Closed>;
+
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                // perform one send ref loop iteration
+                self.0
+                    .inner
+                    .poll_send_ref(|| cx.waker().clone())
+                    .map(|ok| ok.map(SendRef))
+            }
+        }
+
+        SendRefFuture(self).await
+    }
+
+    pub async fn send(&self, val: T) -> Result<(), Closed<T>> {
+        match self.send_ref().await {
+            Err(Closed(())) => Err(Closed(val)),
+            Ok(mut slot) => {
+                slot.with_mut(|slot| *slot = val);
+                Ok(())
+            }
+        }
+    }
 }
 
 impl<T> Clone for Sender<T> {

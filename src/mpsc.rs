@@ -12,10 +12,14 @@
 
 use crate::{
     loom::atomic::AtomicUsize,
-    util::wait::{Notify, WaitCell},
+    util::{
+        wait::{Notify, WaitCell},
+        Backoff,
+    },
     Ref, ThingBuf,
 };
 use core::fmt;
+use core::task::Poll;
 
 #[cfg(feature = "alloc")]
 use crate::util::wait::WaitQueue;
@@ -31,7 +35,7 @@ pub enum TrySendError<T = ()> {
 pub struct Closed<T = ()>(T);
 
 #[derive(Debug)]
-struct Inner<T, N: Notify> {
+struct Inner<T, N> {
     thingbuf: ThingBuf<T>,
     rx_wait: WaitCell<N>,
     tx_count: AtomicUsize,
@@ -56,19 +60,7 @@ impl TrySendError {
 }
 
 // ==== impl Inner ====
-impl<T, N: Notify> Inner<T, N> {
-    #[cfg(not(test))]
-    const fn new(thingbuf: ThingBuf<T>) -> Self {
-        Self {
-            thingbuf,
-            rx_wait: WaitCell::new(),
-            tx_count: AtomicUsize::new(1),
-            #[cfg(feature = "alloc")]
-            tx_wait: WaitQueue::new(),
-        }
-    }
-
-    #[cfg(test)]
+impl<T, N> Inner<T, N> {
     fn new(thingbuf: ThingBuf<T>) -> Self {
         Self {
             thingbuf,
@@ -103,6 +95,42 @@ impl<T: Default, N: Notify> Inner<T, N> {
             }
             Err(e) => Err(e.with_value(val)),
         }
+    }
+
+    /// Performs one iteration of the `send_ref` loop.
+    ///
+    /// The loop itself has to be written in the actual `send` method's
+    /// implementation, rather than on `inner`, because it might be async and
+    /// may yield, or might park the thread.
+    fn poll_send_ref(
+        &self,
+        mk_waiter: impl FnOnce() -> N,
+    ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
+        let mut backoff = Backoff::new();
+        // try to send a few times in a spin loop, in case the receiver is
+        // currently reading from the channel.
+        while !backoff.done_yelding() {
+            match self.thingbuf.push_ref() {
+                Ok(slot) => return Poll::Ready(Ok(SendRefInner { slot, inner: self })),
+                Err(_) if self.rx_wait.is_rx_closed() => return Poll::Ready(Err(Closed(()))),
+                Err(_) => {}
+            }
+            backoff.spin_yield();
+        }
+
+        if let Some(mut q) = self.tx_wait.lock() {
+            let current = mk_waiter();
+            test_println!("parking sender ({:?})", current);
+            q.push_waiter(current);
+        } else {
+            return Poll::Ready(Err(Closed(())));
+        }
+
+        // park the thread ONLY AFTER RELEASING THE WAIT QUEUE LOCK.
+        // otherwise, this could deadlock!
+        self.rx_wait.notify();
+        // okay, tell the `send_ref` loop it's time to park for this iteration.
+        Poll::Pending
     }
 }
 
@@ -253,7 +281,7 @@ macro_rules! impl_recv_ref {
         impl<T> Drop for RecvRef<'_, T> {
             fn drop(&mut self) {
                 test_println!("drop RecvRef<T, {}>", stringify!($notify));
-                if let Some(lock) = self.inner.tx_wait.lock() {
+                if let Some(mut lock) = self.inner.tx_wait.lock() {
                     lock.notify();
                 }
             }

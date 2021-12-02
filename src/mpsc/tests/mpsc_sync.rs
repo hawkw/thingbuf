@@ -67,7 +67,7 @@ fn rx_closes() {
 }
 
 #[test]
-fn spsc_recv_then_send() {
+fn spsc_recv_then_try_send() {
     loom::model(|| {
         let (tx, rx) = sync::channel(ThingBuf::<i32>::new(4));
         let consumer = thread::spawn(move || {
@@ -94,7 +94,7 @@ fn spsc_recv_then_close() {
 }
 
 #[test]
-fn spsc_recv_then_send_then_close() {
+fn spsc_recv_then_try_send_then_close() {
     loom::model(|| {
         let (tx, rx) = sync::channel(ThingBuf::<i32>::new(2));
         let consumer = thread::spawn(move || {
@@ -105,6 +105,26 @@ fn spsc_recv_then_send_then_close() {
 
         tx.try_send(10).unwrap();
         tx.try_send(20).unwrap();
+        drop(tx);
+        consumer.join().unwrap();
+    })
+}
+
+#[test]
+fn spsc_send_recv_in_order() {
+    const N_SENDS: usize = 4;
+    loom::model(|| {
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS / 2));
+        let consumer = thread::spawn(move || {
+            for i in 1..=N_SENDS {
+                assert_eq!(rx.recv(), Some(i));
+            }
+            assert_eq!(rx.recv(), None);
+        });
+
+        for i in 1..=N_SENDS {
+            tx.send(i).unwrap()
+        }
         drop(tx);
         consumer.join().unwrap();
     })

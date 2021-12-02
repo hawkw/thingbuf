@@ -11,9 +11,6 @@ use crate::{
 };
 use core::{fmt, ops};
 
-#[cfg(feature = "std")]
-use crate::loom::thread;
-
 /// An atomically registered waiter ([`Waker`] or [`Thread`]).
 ///
 /// This is inspired by the [`AtomicWaker` type] used in Tokio's
@@ -148,15 +145,15 @@ impl<T: Notify> WaitCell<T> {
         result
     }
 
-    pub(crate) fn notify(&self) {
+    pub(crate) fn notify(&self) -> bool {
         self.notify2(false)
     }
 
     pub(crate) fn close_tx(&self) {
-        self.notify2(true)
+        self.notify2(true);
     }
 
-    fn notify2(&self, close: bool) {
+    fn notify2(&self, close: bool) -> bool {
         test_println!("notifying; close={:?};", close);
         let bits = if close {
             State::NOTIFYING | State::TX_CLOSED
@@ -172,8 +169,10 @@ impl<T: Notify> WaitCell<T> {
 
             if let Some(waiter) = test_dbg!(waiter) {
                 waiter.notify();
+                return true;
             }
         }
+        false
     }
 }
 

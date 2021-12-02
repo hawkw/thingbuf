@@ -57,19 +57,22 @@ impl<T: Default> Sender<T> {
 
     pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
         loop {
-            match self.try_send_ref() {
-                Ok(slot) => return Ok(slot),
-                Err(TrySendError::Closed(())) => return Err(Closed(())),
-                Err(_) => {}
+            // perform one send ref loop iteration
+            if let Poll::Ready(result) = self.inner.poll_send_ref(thread::current) {
+                return result.map(SendRef);
             }
 
-            if let Some(mut q) = self.inner.tx_wait.lock() {
-                let current = thread::current();
-                test_println!("parking sender ({:?})", current);
-                q.push_waiter(current);
-                thread::park();
-            } else {
-                return Err(Closed(()));
+            // if that iteration failed, park the thread.
+            thread::park();
+        }
+    }
+
+    pub fn send(&self, val: T) -> Result<(), Closed<T>> {
+        match self.send_ref() {
+            Err(Closed(())) => Err(Closed(val)),
+            Ok(mut slot) => {
+                slot.with_mut(|slot| *slot = val);
+                Ok(())
             }
         }
     }

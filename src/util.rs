@@ -54,6 +54,10 @@ impl Backoff {
             self.0 += 1;
         }
     }
+
+    pub(crate) fn done_yelding(&self) -> bool {
+        self.0 >= Self::MAX_YIELDS
+    }
 }
 
 // === impl CachePadded ===
