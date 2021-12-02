@@ -37,8 +37,7 @@ pub struct Ref<'slot, T> {
     new_state: usize,
 }
 
-#[derive(Debug)]
-pub struct AtCapacity(pub(crate) usize);
+pub struct Full<T = ()>(T);
 
 #[derive(Debug)]
 struct Core {
@@ -110,7 +109,7 @@ impl Core {
         self.capacity
     }
 
-    fn push_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, AtCapacity>
+    fn push_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, Full<()>>
     where
         T: Default,
         S: Index<usize, Output = Slot<T>> + ?Sized,
@@ -164,7 +163,7 @@ impl Core {
 
             if state.wrapping_add(self.gen) == tail + 1 {
                 if self.head.load(Ordering::SeqCst).wrapping_add(self.gen) == tail {
-                    return Err(AtCapacity(self.capacity()));
+                    return Err(Full(()));
                 }
 
                 backoff.spin();
@@ -341,3 +340,15 @@ impl<T> Slot<T> {
 }
 
 unsafe impl<T: Sync> Sync for Slot<T> {}
+
+impl<T> fmt::Debug for Full<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Full(..)")
+    }
+}
+
+impl<T> fmt::Display for Full<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("channel full")
+    }
+}

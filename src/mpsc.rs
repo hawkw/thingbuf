@@ -19,13 +19,19 @@ feature! {
 
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum TrySendError {
-    AtCapacity(crate::AtCapacity),
-    Closed(Closed),
+pub enum TrySendError<T = ()> {
+    Full(T),
+    Closed(T),
 }
 
-#[derive(Debug)]
-pub struct Closed(pub(crate) ());
+impl TrySendError {
+    fn with_value<T>(self, value: T) -> TrySendError<T> {
+        match self {
+            Self::Full(()) => TrySendError::Full(value),
+            Self::Closed(()) => TrySendError::Closed(value),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests;

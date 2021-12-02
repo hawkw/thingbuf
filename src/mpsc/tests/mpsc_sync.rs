@@ -46,7 +46,7 @@ fn rx_closes() {
                 'send: loop {
                     match tx.try_send(i) {
                         Ok(_) => break 'send,
-                        Err(TrySendError::AtCapacity(_)) => thread::yield_now(),
+                        Err(TrySendError::Full(_)) => thread::yield_now(),
                         Err(TrySendError::Closed(_)) => break 'iters,
                     }
                 }
