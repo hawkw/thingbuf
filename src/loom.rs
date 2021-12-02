@@ -114,8 +114,8 @@ mod inner {
 
     pub(crate) fn model(model: impl Fn() + std::panic::UnwindSafe + Sync + Send + 'static) {
         let mut builder = loom::model::Builder::default();
-        // // A couple of our tests will hit the max number of branches riiiiight
-        // // before they should complete. Double it so this stops happening.
+        // A couple of our tests will hit the max number of branches riiiiight
+        // before they should complete. Double it so this stops happening.
         builder.max_branches *= 2;
         run_builder(builder, model)
     }

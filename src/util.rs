@@ -21,8 +21,8 @@ pub(crate) struct CachePadded<T>(pub(crate) T);
 // === impl Backoff ===
 
 impl Backoff {
-    const MAX_SPINS: u8 = 6;
-    const MAX_YIELDS: u8 = 10;
+    const MAX_SPINS: u8 = 3;
+    const MAX_YIELDS: u8 = 6;
     #[inline]
     pub(crate) fn new() -> Self {
         Self(0)
