@@ -121,3 +121,17 @@ fn spsc_recv_then_send_then_close() {
         consumer.join().unwrap();
     })
 }
+
+#[test]
+fn tx_close_wakes() {
+    loom::model(|| {
+        let (tx, rx) = channel(ThingBuf::<i32>::new(2));
+        let consumer = thread::spawn(move || {
+            future::block_on(async move {
+                assert_eq!(rx.recv().await, None);
+            })
+        });
+        drop(tx);
+        consumer.join().unwrap();
+    });
+}

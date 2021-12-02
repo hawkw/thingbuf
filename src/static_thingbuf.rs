@@ -74,9 +74,10 @@ impl<T, const CAP: usize> Drop for StaticThingBuf<T, CAP> {
 
 impl<T, const CAP: usize> fmt::Debug for StaticThingBuf<T, CAP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ThingBuf")
-            .field("capacity", &self.capacity())
+        f.debug_struct("StaticThingBuf")
             .field("len", &self.len())
+            .field("slots", &format_args!("[...]"))
+            .field("core", &self.core)
             .finish()
     }
 }

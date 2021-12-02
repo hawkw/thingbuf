@@ -1,5 +1,8 @@
 use crate::loom;
-use core::ops::{Deref, DerefMut};
+use core::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
 
 pub(crate) mod panic;
 pub(crate) mod wait;
@@ -12,7 +15,7 @@ pub(crate) struct Backoff(u8);
     not(any(target_arch = "x86_64", target_arch = "aarch64")),
     repr(align(64))
 )]
-#[derive(Clone, Copy, Default, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
 pub(crate) struct CachePadded<T>(pub(crate) T);
 
 // === impl Backoff ===
@@ -66,5 +69,11 @@ impl<T> Deref for CachePadded<T> {
 impl<T> DerefMut for CachePadded<T> {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.0
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for CachePadded<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }

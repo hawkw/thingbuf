@@ -29,10 +29,12 @@ pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
     (tx, rx)
 }
 
+#[derive(Debug)]
 pub struct Sender<T> {
     inner: Arc<Inner<T>>,
 }
 
+#[derive(Debug)]
 pub struct Receiver<T> {
     inner: Arc<Inner<T>>,
 }
@@ -62,6 +64,7 @@ pub struct RecvFuture<'a, T> {
     rx: &'a Receiver<T>,
 }
 
+#[derive(Debug)]
 struct Inner<T> {
     thingbuf: ThingBuf<T>,
     rx_wait: WaitCell<Waker>,

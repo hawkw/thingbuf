@@ -76,8 +76,9 @@ impl<T> Drop for ThingBuf<T> {
 impl<T> fmt::Debug for ThingBuf<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ThingBuf")
-            .field("capacity", &self.capacity())
             .field("len", &self.len())
+            .field("slots", &format_args!("[...]"))
+            .field("core", &self.core)
             .finish()
     }
 }
