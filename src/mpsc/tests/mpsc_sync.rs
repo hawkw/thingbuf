@@ -111,6 +111,54 @@ fn spsc_recv_then_try_send_then_close() {
 }
 
 #[test]
+fn mpsc_send_recv() {
+    // make this bigger at YOUR OWN RISK; this model takes like a gazillion
+    // years to run otherwise.
+    const N_SENDS: usize = 2;
+
+    fn do_producer(tx: sync::Sender<usize>, tag: usize) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            for i in 1..=N_SENDS {
+                test_println!("SENDING {:?}", i + tag);
+                tx.send(i + tag).unwrap();
+                test_println!("SENT {:?}", i + tag);
+            }
+        })
+    }
+
+    loom::model(|| {
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS));
+        let producer1 = do_producer(tx.clone(), 10);
+        let producer2 = do_producer(tx, 20);
+
+        let mut results = Vec::new();
+        while let Some(val) = rx.recv() {
+            test_println!("RECEIVED {:?}", val);
+            results.push(val);
+        }
+
+        producer1.join().expect("producer 1 panicked");
+        producer2.join().expect("producer 2 panicked");
+
+        assert_eq!(results.len(), N_SENDS * 2);
+        for i in 1..=N_SENDS {
+            assert!(
+                results.contains(&(i + 10)),
+                "missing value from producer 1; i={:?}; results={:?}",
+                i,
+                results
+            );
+            assert!(
+                results.contains(&(i + 20)),
+                "missing value from producer 2; i={:?}; results={:?}",
+                i,
+                results
+            );
+        }
+    })
+}
+
+#[test]
 fn spsc_send_recv_in_order() {
     const N_SENDS: usize = 4;
     loom::model(|| {

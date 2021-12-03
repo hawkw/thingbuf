@@ -126,7 +126,7 @@ fn spsc_recv_then_send_then_close() {
 fn spsc_send_recv_in_order() {
     const N_SENDS: usize = 4;
     loom::model(|| {
-        let (tx, rx) = channel(ThingBuf::<usize>::new(N_SENDS / 2));
+        let (tx, rx) = channel(ThingBuf::<usize>::new(N_SENDS));
         let consumer = thread::spawn(move || {
             future::block_on(async move {
                 for i in 1..=N_SENDS {
