@@ -188,6 +188,7 @@ impl<T, N: Notify> Drop for SendRefInner<'_, T, N> {
     #[inline]
     fn drop(&mut self) {
         test_println!("drop SendRef<T, {}>", std::any::type_name::<N>());
+        self.slot.release();
         self.inner.rx_wait.notify();
     }
 }
@@ -319,6 +320,7 @@ macro_rules! impl_recv_ref {
         impl<T> Drop for RecvRef<'_, T> {
             fn drop(&mut self) {
                 test_println!("drop RecvRef<T, {}>", stringify!($notify));
+                self.slot.release();
                 self.inner.tx_wait.notify();
             }
         }

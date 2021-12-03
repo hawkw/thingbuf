@@ -256,6 +256,8 @@ impl Core {
 // === impl Ref ===
 
 impl<T> Ref<'_, T> {
+    const RELEASED: usize = usize::MAX;
+
     #[inline]
     pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
         self.slot.value.with(|value| unsafe {
@@ -278,15 +280,25 @@ impl<T> Ref<'_, T> {
             f(&mut *(&mut *value).as_mut_ptr())
         })
     }
+
+    pub(crate) fn release(&mut self) {
+        if self.new_state == Self::RELEASED {
+            test_println!("release_ref; already released");
+            return;
+        }
+
+        test_println!("release_ref");
+        self.slot
+            .state
+            .store(test_dbg!(self.new_state), Ordering::Release);
+        self.new_state = Self::RELEASED;
+    }
 }
 
 impl<T> Drop for Ref<'_, T> {
     #[inline]
     fn drop(&mut self) {
-        test_println!("drop_ref");
-        self.slot
-            .state
-            .store(test_dbg!(self.new_state), Ordering::Release);
+        self.release();
     }
 }
 
