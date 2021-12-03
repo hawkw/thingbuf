@@ -1,7 +1,6 @@
 use super::*;
 use crate::{
-    loom::{self, atomic::Ordering, sync::Arc},
-    util::wait::WaitResult,
+    loom::{atomic::Ordering, sync::Arc},
     Ref, ThingBuf,
 };
 use core::{
@@ -33,6 +32,10 @@ pub struct Receiver<T> {
 
 impl_send_ref! {
     pub struct SendRef<Waker>;
+}
+
+impl_recv_ref! {
+    pub struct RecvRef<Waker>;
 }
 
 /// A [`Future`] that tries to receive a reference from a [`Receiver`].
@@ -141,37 +144,13 @@ impl<T: Default> Receiver<T> {
     /// sender, or when the channel is closed.  Note that on multiple calls to
     /// `poll_recv_ref`, only the [`Waker`] from the [`Context`] passed to the most
     /// recent call is scheduled to receive a wakeup.
-    pub fn poll_recv_ref(&self, cx: &mut Context<'_>) -> Poll<Option<Ref<'_, T>>> {
-        loop {
-            if let Some(r) = self.try_recv_ref() {
-                return Poll::Ready(Some(r));
-            }
-
-            // Okay, no value is ready --- try to wait.
-            match test_dbg!(self.inner.rx_wait.wait_with(|| cx.waker().clone())) {
-                WaitResult::TxClosed => {
-                    // All senders have been dropped, but the channel might
-                    // still have messages in it. Return `Ready`; if the recv'd ref
-                    // is `None` then we've popped everything.
-                    return Poll::Ready(self.try_recv_ref());
-                }
-                WaitResult::Wait => {
-                    // make sure nobody sent a message while we were registering
-                    // the waiter...
-                    // XXX(eliza): a nicer solution _might_ just be to pack the
-                    // waiter state into the tail idx or something or something
-                    // but that kind of defeats the purpose of just having a
-                    // nice "wrap a queue into a channel" API...
-                    if let Some(val) = self.try_recv_ref() {
-                        return Poll::Ready(Some(val));
-                    }
-                    return Poll::Pending;
-                }
-                WaitResult::Notified => {
-                    loom::hint::spin_loop();
-                }
-            };
-        }
+    pub fn poll_recv_ref(&self, cx: &mut Context<'_>) -> Poll<Option<RecvRef<'_, T>>> {
+        self.inner.poll_recv_ref(|| cx.waker().clone()).map(|some| {
+            some.map(|slot| RecvRef {
+                slot,
+                inner: &*self.inner,
+            })
+        })
     }
 
     /// # Returns
@@ -192,10 +171,6 @@ impl<T: Default> Receiver<T> {
             .map(|opt| opt.map(|mut r| r.with_mut(core::mem::take)))
     }
 
-    fn try_recv_ref(&self) -> Option<Ref<'_, T>> {
-        self.inner.thingbuf.pop_ref()
-    }
-
     pub fn is_closed(&self) -> bool {
         test_dbg!(self.inner.tx_count.load(Ordering::SeqCst)) <= 1
     }
@@ -210,7 +185,7 @@ impl<T> Drop for Receiver<T> {
 // === impl RecvRefFuture ===
 
 impl<'a, T: Default> Future for RecvRefFuture<'a, T> {
-    type Output = Option<Ref<'a, T>>;
+    type Output = Option<RecvRef<'a, T>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.rx.poll_recv_ref(cx)

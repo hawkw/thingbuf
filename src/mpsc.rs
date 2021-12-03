@@ -11,9 +11,9 @@
 //! can be constructed using the [`sync::channel`] function.
 
 use crate::{
-    loom::atomic::AtomicUsize,
+    loom::{atomic::AtomicUsize, hint},
     util::{
-        wait::{Notify, WaitCell},
+        wait::{Notify, WaitCell, WaitResult},
         Backoff,
     },
     Ref, ThingBuf,
@@ -131,6 +131,44 @@ impl<T: Default, N: Notify> Inner<T, N> {
         self.rx_wait.notify();
         // okay, tell the `send_ref` loop it's time to park for this iteration.
         Poll::Pending
+    }
+
+    /// Performs one iteration of the `recv_ref` loop.
+    ///
+    /// The loop itself has to be written in the actual `send` method's
+    /// implementation, rather than on `inner`, because it might be async and
+    /// may yield, or might park the thread.
+    fn poll_recv_ref(&self, mk_waiter: impl Fn() -> N) -> Poll<Option<Ref<'_, T>>> {
+        loop {
+            // If we got a value, return it!
+            if let Some(slot) = self.thingbuf.pop_ref() {
+                return Poll::Ready(Some(slot));
+            }
+
+            // otherwise, gotosleep
+            match test_dbg!(self.rx_wait.wait_with(&mk_waiter)) {
+                WaitResult::TxClosed => {
+                    // All senders have been dropped, but the channel might
+                    // still have messages in it...
+                    return Poll::Ready(self.thingbuf.pop_ref());
+                }
+                WaitResult::Wait => {
+                    // make sure nobody sent a message while we were registering
+                    // the waiter...
+                    // XXX(eliza): a nicer solution _might_ just be to pack the
+                    // waiter state into the tail idx or something or something
+                    // but that kind of defeats the purpose of just having a
+                    // nice "wrap a queue into a channel" API...
+                    if let Some(slot) = self.thingbuf.pop_ref() {
+                        return Poll::Ready(Some(slot));
+                    }
+                    return Poll::Pending;
+                }
+                WaitResult::Notified => {
+                    hint::spin_loop();
+                }
+            }
+        }
     }
 }
 

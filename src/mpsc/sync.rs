@@ -6,12 +6,10 @@
 use super::*;
 use crate::{
     loom::{
-        self,
         atomic::Ordering,
         sync::Arc,
         thread::{self, Thread},
     },
-    util::wait::WaitResult,
     Ref, ThingBuf,
 };
 use core::fmt;
@@ -104,42 +102,16 @@ impl<T> Drop for Sender<T> {
 impl<T: Default> Receiver<T> {
     pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
         loop {
-            // If we got a value, return it!
-            if let Some(slot) = self.inner.thingbuf.pop_ref() {
-                return Some(RecvRef {
-                    slot,
-                    inner: &self.inner,
-                });
-            }
-
-            // otherwise, gotosleep
-            match test_dbg!(self.inner.rx_wait.wait_with(thread::current)) {
-                WaitResult::TxClosed => {
-                    // All senders have been dropped, but the channel might
-                    // still have messages in it...
-                    return self.inner.thingbuf.pop_ref().map(|slot| RecvRef {
+            match self.inner.poll_recv_ref(thread::current) {
+                Poll::Ready(r) => {
+                    return r.map(|slot| RecvRef {
                         slot,
-                        inner: &self.inner,
-                    });
+                        inner: &*self.inner,
+                    })
                 }
-                WaitResult::Wait => {
-                    // make sure nobody sent a message while we were registering
-                    // the waiter...
-                    // XXX(eliza): a nicer solution _might_ just be to pack the
-                    // waiter state into the tail idx or something or something
-                    // but that kind of defeats the purpose of just having a
-                    // nice "wrap a queue into a channel" API...
-                    if let Some(slot) = self.inner.thingbuf.pop_ref() {
-                        return Some(RecvRef {
-                            slot,
-                            inner: &self.inner,
-                        });
-                    }
+                Poll::Pending => {
                     test_println!("parking ({:?})", thread::current());
                     thread::park();
-                }
-                WaitResult::Notified => {
-                    loom::hint::spin_loop();
                 }
             }
         }
