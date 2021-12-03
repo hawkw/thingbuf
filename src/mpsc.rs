@@ -319,9 +319,7 @@ macro_rules! impl_recv_ref {
         impl<T> Drop for RecvRef<'_, T> {
             fn drop(&mut self) {
                 test_println!("drop RecvRef<T, {}>", stringify!($notify));
-                if let Some(mut lock) = self.inner.tx_wait.lock() {
-                    lock.notify();
-                }
+                self.inner.tx_wait.notify();
             }
         }
     };

@@ -1,10 +1,10 @@
 use super::Notify;
 use crate::{
     loom::{
-        atomic::{AtomicUsize, Ordering::*},
+        atomic::{AtomicBool, AtomicUsize, Ordering::*},
         UnsafeCell,
     },
-    util::{panic, Backoff},
+    util::{panic, Backoff, CachePadded},
 };
 use alloc::collections::VecDeque;
 use core::fmt;
@@ -16,7 +16,8 @@ use core::fmt;
 // XXX(eliza): the biggest downside of this is that it can't be used without
 // `liballoc`, which is sad for `no-std` async-await users...
 pub(crate) struct WaitQueue<T> {
-    locked: AtomicUsize,
+    locked: CachePadded<AtomicUsize>,
+    is_empty: CachePadded<AtomicBool>,
     queue: UnsafeCell<VecDeque<T>>,
 }
 
@@ -29,7 +30,8 @@ const CLOSED: usize = 0b10;
 impl<T> WaitQueue<T> {
     pub(crate) fn new() -> Self {
         Self {
-            locked: AtomicUsize::new(UNLOCKED),
+            locked: CachePadded(AtomicUsize::new(UNLOCKED)),
+            is_empty: CachePadded(AtomicBool::new(true)),
             queue: UnsafeCell::new(VecDeque::new()),
         }
     }
@@ -55,9 +57,25 @@ impl<T> WaitQueue<T> {
         }
     }
 }
+impl<T: Notify> WaitQueue<T> {
+    pub(crate) fn notify(&self) -> bool {
+        if self.is_empty.load(Acquire) {
+            return false;
+        }
+
+        if let Some(mut lock) = self.lock() {
+            return lock.notify();
+        }
+
+        false
+    }
+}
 
 impl<T> Drop for WaitQueue<T> {
     fn drop(&mut self) {
+        if self.is_empty.load(Acquire) {
+            return;
+        }
         if let Some(lock) = self.lock() {
             self.locked.fetch_or(CLOSED, Release);
             lock.0.queue.with_mut(|q| {
@@ -78,16 +96,25 @@ impl<T> fmt::Debug for WaitQueue<T> {
 
 impl<T: Notify> Locked<'_, T> {
     pub(crate) fn push_waiter(&mut self, waiter: T) -> usize {
-        self.0.queue.with_mut(|q| unsafe {
+        let len = self.0.queue.with_mut(|q| unsafe {
             (*q).push_back(waiter);
             (*q).len()
-        })
+        });
+        let _ = self
+            .0
+            .is_empty
+            .compare_exchange(true, false, Release, Relaxed);
+        len
     }
 
-    pub(crate) fn notify(&mut self) -> bool {
+    fn notify(&mut self) -> bool {
         self.0.queue.with_mut(|q| {
-            if let Some(waiter) = unsafe { (*q).pop_front() } {
+            let q = unsafe { &mut *q };
+            if let Some(waiter) = q.pop_front() {
                 waiter.notify();
+                if q.is_empty() {
+                    self.0.is_empty.store(true, Release);
+                }
                 true
             } else {
                 false
