@@ -153,15 +153,15 @@ impl<T: Default, N: Notify> Inner<T, N> {
                     return Poll::Ready(self.thingbuf.pop_ref());
                 }
                 WaitResult::Wait => {
-                    // make sure nobody sent a message while we were registering
-                    // the waiter...
-                    // XXX(eliza): a nicer solution _might_ just be to pack the
-                    // waiter state into the tail idx or something or something
-                    // but that kind of defeats the purpose of just having a
-                    // nice "wrap a queue into a channel" API...
-                    if let Some(slot) = self.thingbuf.pop_ref() {
-                        return Poll::Ready(Some(slot));
-                    }
+                    // // make sure nobody sent a message while we were registering
+                    // // the waiter...
+                    // // XXX(eliza): a nicer solution _might_ just be to pack the
+                    // // waiter state into the tail idx or something or something
+                    // // but that kind of defeats the purpose of just having a
+                    // // nice "wrap a queue into a channel" API...
+                    // if let Some(slot) = self.thingbuf.pop_ref() {
+                    //     return Poll::Ready(Some(slot));
+                    // }
                     return Poll::Pending;
                 }
                 WaitResult::Notified => {

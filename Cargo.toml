@@ -33,3 +33,6 @@ harness = false
 [[bench]]
 name = "async_mpsc"
 harness = false
+
+[patch.crates-io]
+loom = { git = "https://github.com/tokio-rs/loom", branch = "eliza/fix-double-panic-in-drop" }

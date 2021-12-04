@@ -66,6 +66,10 @@ impl Backoff {
         }
     }
 
+    pub(crate) fn done_spinning(&self) -> bool {
+        self.0 >= Self::MAX_SPINS
+    }
+
     pub(crate) fn done_yelding(&self) -> bool {
         self.0 >= Self::MAX_YIELDS
     }

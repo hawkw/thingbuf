@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-use core::{fmt, mem::MaybeUninit, ops::Index};
+use core::{cmp, fmt, mem::MaybeUninit, ops::Index};
 
 #[macro_use]
 mod macros;
@@ -26,7 +26,7 @@ pub use self::static_thingbuf::StaticThingBuf;
 
 use crate::{
     loom::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{self, AtomicUsize, Ordering::*},
         UnsafeCell,
     },
     util::{Backoff, CachePadded},
@@ -116,27 +116,30 @@ impl Core {
     {
         test_println!("push_ref");
         let mut backoff = Backoff::new();
-        let mut tail = self.tail.load(Ordering::Relaxed);
+        let mut tail = self.tail.load(Relaxed);
 
         loop {
             let (idx, gen) = self.idx_gen(tail);
             test_dbg!(idx);
             test_dbg!(gen);
             let slot = &slots[idx];
-            let state = slot.state.load(Ordering::Acquire);
+            let actual_state = test_dbg!(slot.state.load(Acquire));
+            let state = if actual_state == EMPTY_STATE {
+                idx
+            } else {
+                actual_state
+            };
 
-            if state == tail || (state == 0 && gen == 0) {
+            if test_dbg!(state == tail) || test_dbg!(actual_state == EMPTY_STATE && gen == 0) {
                 // Move the tail index forward by 1.
                 let next_tail = self.next(idx, gen);
-                match self.tail.compare_exchange_weak(
-                    tail,
-                    next_tail,
-                    Ordering::AcqRel,
-                    Ordering::Relaxed,
-                ) {
+                match test_dbg!(self
+                    .tail
+                    .compare_exchange_weak(tail, next_tail, SeqCst, Acquire))
+                {
                     Ok(_) => {
                         // We got the slot! It's now okay to write to it
-                        test_println!("claimed tail slot");
+                        test_println!("claimed tail slot [{}]", idx);
                         if gen == 0 {
                             slot.value.with_mut(|value| unsafe {
                                 // Safety: we have just claimed exclusive ownership over
@@ -161,8 +164,11 @@ impl Core {
                 }
             }
 
-            if state.wrapping_add(self.gen) == tail + 1 {
-                if self.head.load(Ordering::SeqCst).wrapping_add(self.gen) == tail {
+            if test_dbg!(state.wrapping_add(self.gen) == tail + 1) {
+                test_dbg!(atomic::fence(SeqCst));
+                let head = test_dbg!(self.head.load(Relaxed));
+                if test_dbg!(head.wrapping_add(self.gen) == tail) {
+                    test_println!("channel full");
                     return Err(Full(()));
                 }
 
@@ -171,7 +177,7 @@ impl Core {
                 backoff.spin_yield();
             }
 
-            tail = self.tail.load(Ordering::Relaxed)
+            tail = test_dbg!(self.tail.load(Relaxed));
         }
     }
 
@@ -181,7 +187,7 @@ impl Core {
     {
         test_println!("pop_ref");
         let mut backoff = Backoff::new();
-        let mut head = self.head.load(Ordering::Relaxed);
+        let mut head = self.head.load(Relaxed);
 
         loop {
             test_dbg!(head);
@@ -189,21 +195,19 @@ impl Core {
             test_dbg!(idx);
             test_dbg!(gen);
             let slot = &slots[idx];
-            let state = slot.state.load(Ordering::Acquire);
-            test_dbg!(state);
+            let state = test_dbg!(slot.state.load(Acquire));
+            let state = if state == EMPTY_STATE { idx } else { state };
 
             // If the slot's state is ahead of the head index by one, we can pop
             // it.
             if test_dbg!(state == head + 1) {
                 let next_head = self.next(idx, gen);
-                match self.head.compare_exchange(
-                    head,
-                    next_head,
-                    Ordering::SeqCst,
-                    Ordering::Relaxed,
-                ) {
+                match test_dbg!(self
+                    .head
+                    .compare_exchange_weak(head, next_head, SeqCst, Acquire))
+                {
                     Ok(_) => {
-                        test_println!("claimed head slot");
+                        test_println!("claimed head slot [{}]", idx);
                         return Some(Ref {
                             new_state: head.wrapping_add(self.gen),
                             slot,
@@ -218,28 +222,30 @@ impl Core {
             }
 
             if test_dbg!(state == head) {
-                let tail = self.tail.load(Ordering::SeqCst);
+                test_dbg!(atomic::fence(SeqCst));
+                let tail = test_dbg!(self.tail.load(Relaxed));
 
                 if test_dbg!(tail == head) {
                     return None;
                 }
 
                 backoff.spin();
+            // } else if test_dbg!(backoff.done_yelding()) {
+            //     return None;
             } else {
                 backoff.spin_yield();
             }
 
-            head = self.head.load(Ordering::Relaxed);
+            head = test_dbg!(self.head.load(Relaxed));
         }
     }
 
     fn len(&self) -> usize {
-        use std::cmp;
         loop {
-            let tail = self.tail.load(Ordering::SeqCst);
-            let head = self.head.load(Ordering::SeqCst);
+            let tail = self.tail.load(SeqCst);
+            let head = self.head.load(SeqCst);
 
-            if self.tail.load(Ordering::SeqCst) == tail {
+            if self.tail.load(SeqCst) == tail {
                 let (head_idx, _) = self.idx_gen(head);
                 let (tail_idx, _) = self.idx_gen(tail);
                 return match head_idx.cmp(&tail_idx) {
@@ -288,9 +294,7 @@ impl<T> Ref<'_, T> {
         }
 
         test_println!("release_ref");
-        self.slot
-            .state
-            .store(test_dbg!(self.new_state), Ordering::Release);
+        self.slot.state.store(test_dbg!(self.new_state), Release);
         self.new_state = Self::RELEASED;
     }
 }
@@ -333,12 +337,14 @@ impl<T: fmt::Write> fmt::Write for Ref<'_, T> {
 
 // === impl Slot ===
 
+const EMPTY_STATE: usize = usize::MAX;
+
 impl<T> Slot<T> {
     #[cfg(not(test))]
     const fn empty() -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
-            state: AtomicUsize::new(0),
+            state: AtomicUsize::new(EMPTY_STATE),
         }
     }
 
@@ -346,7 +352,7 @@ impl<T> Slot<T> {
     fn empty() -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
-            state: AtomicUsize::new(0),
+            state: AtomicUsize::new(EMPTY_STATE),
         }
     }
 }
