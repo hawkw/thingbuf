@@ -30,7 +30,14 @@ impl Backoff {
 
     #[inline]
     pub(crate) fn spin(&mut self) {
+        #[cfg(not(test))]
         for _ in 0..test_dbg!(1 << self.0.min(Self::MAX_SPINS)) {
+            loom::hint::spin_loop();
+        }
+
+        #[cfg(test)]
+        {
+            test_println!("hint::spin_loop() (x{})", 1 << self.0.min(Self::MAX_SPINS));
             loom::hint::spin_loop();
         }
 
@@ -42,11 +49,15 @@ impl Backoff {
     #[inline]
     pub(crate) fn spin_yield(&mut self) {
         if self.0 <= Self::MAX_SPINS || cfg!(not(any(feature = "std", test))) {
+            #[cfg(not(test))]
             for _ in 0..1 << self.0 {
                 loom::hint::spin_loop();
             }
+
+            test_println!("hint::spin_loop() (x{})", 1 << self.0);
         }
 
+        test_println!("thread::yield_now()");
         #[cfg(any(test, feature = "std"))]
         loom::thread::yield_now();
 
