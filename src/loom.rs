@@ -6,17 +6,67 @@ mod inner {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
-    pub(crate) use loom::{cell::UnsafeCell, future, hint, sync, thread};
 
-    pub(crate) fn model(f: impl Fn() + Sync + Send + 'static) {
-        let iteration = core::sync::atomic::AtomicUsize::new(0);
-        loom::model(move || {
-            println!(
-                "\n---- iteration {} ----\n",
-                iteration.fetch_add(1, atomic::Ordering::Relaxed)
-            );
-            f();
+    pub(crate) use loom::{cell::UnsafeCell, future, hint, sync, thread};
+    use std::{cell::RefCell, fmt::Write};
+
+    std::thread_local! {
+        static TRACE_BUF: RefCell<String> = RefCell::new(String::new());
+    }
+
+    pub(crate) fn traceln(args: std::fmt::Arguments) {
+        let mut args = Some(args);
+        TRACE_BUF
+            .try_with(|buf| {
+                let mut buf = buf.borrow_mut();
+                let _ = buf.write_fmt(args.take().unwrap());
+                let _ = buf.write_char('\n');
+            })
+            .unwrap_or_else(|_| println!("{}", args.take().unwrap()))
+    }
+
+    pub(crate) fn run_builder(
+        builder: loom::model::Builder,
+        model: impl Fn() + Sync + Send + 'static,
+    ) {
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        #[must_use]
+        struct Iteration(());
+
+        impl Drop for Iteration {
+            fn drop(&mut self) {
+                if std::thread::panicking() {
+                    TRACE_BUF
+                        .try_with(|buf| {
+                            if let Ok(buf) = buf.try_borrow() {
+                                eprintln!("{}", buf);
+                            } else {
+                                eprintln!("trace buf already borrowed!");
+                            }
+                        })
+                        .unwrap_or_else(|_| eprintln!("trace buf already torn down!"));
+                } else {
+                    TRACE_BUF.with(|buf| buf.borrow_mut().clear());
+                }
+            }
+        }
+
+        let current_iteration = AtomicUsize::new(1);
+
+        builder.check(move || {
+            traceln(format_args!(
+                "\n---- {} iteration {} ----",
+                std::thread::current().name().unwrap_or("<unknown test>"),
+                current_iteration.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _iter = Iteration(());
+
+            model();
         })
+    }
+
+    pub(crate) fn model(model: impl Fn() + Sync + Send + 'static) {
+        run_builder(loom::model::Builder::default(), model)
     }
 
     pub(crate) mod alloc {
@@ -151,4 +201,12 @@ mod inner {
             }
         }
     }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn traceln(args: std::fmt::Arguments) {
+        eprintln!("{}", args);
+    }
+
+    #[cfg(not(feature = "std"))]
+    pub(crate) fn traceln(_: core::fmt::Arguments) {}
 }
