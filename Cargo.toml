@@ -14,6 +14,8 @@ default = ["std"]
 
 [dev-dependencies]
 loom = { version = "0.5.3", features = ["checkpoint", "futures"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 # So that we can use `poll_fn` in tests.
 futures = "0.3"
 criterion = { version = "0.3.5", features = ["async_tokio"] }
