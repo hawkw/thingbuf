@@ -27,45 +27,90 @@ mod inner {
 
     pub(crate) fn run_builder(
         builder: loom::model::Builder,
-        model: impl Fn() + Sync + Send + 'static,
+        model: impl Fn() + Sync + Send + std::panic::UnwindSafe + 'static,
     ) {
-        use core::sync::atomic::{AtomicUsize, Ordering};
-        #[must_use]
-        struct Iteration(());
+        use std::{
+            env, io,
+            sync::atomic::{AtomicUsize, Ordering},
+        };
+        use tracing_subscriber::{filter::Targets, fmt, prelude::*};
 
-        impl Drop for Iteration {
-            fn drop(&mut self) {
-                if std::thread::panicking() {
-                    TRACE_BUF
-                        .try_with(|buf| {
-                            if let Ok(buf) = buf.try_borrow() {
-                                eprintln!("{}", buf);
-                            } else {
-                                eprintln!("trace buf already borrowed!");
-                            }
-                        })
-                        .unwrap_or_else(|_| eprintln!("trace buf already torn down!"));
-                } else {
-                    TRACE_BUF.with(|buf| buf.borrow_mut().clear());
-                }
+        // set up tracing for loom.
+        const LOOM_LOG: &str = "LOOM_LOG";
+
+        struct TracebufWriter;
+        impl io::Write for TracebufWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                let len = buf.len();
+                let s = std::str::from_utf8(buf)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+                TRACE_BUF.with(|buf| buf.borrow_mut().push_str(s));
+                Ok(len)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
             }
         }
 
-        let current_iteration = AtomicUsize::new(1);
+        let filter = env::var(LOOM_LOG)
+            .ok()
+            .and_then(|var| match var.parse::<Targets>() {
+                Err(e) => {
+                    eprintln!("invalid {}={:?}: {}", LOOM_LOG, var, e);
+                    None
+                }
+                Ok(targets) => Some(targets),
+            })
+            .unwrap_or_else(|| Targets::new().with_target("loom", tracing::Level::INFO));
+        let _ = fmt::Subscriber::builder()
+            .with_writer(|| TracebufWriter)
+            .without_time()
+            .finish()
+            .with(filter)
+            .try_init();
 
-        builder.check(move || {
-            traceln(format_args!(
-                "\n---- {} iteration {} ----",
+        // wrap the loom model with `catch_unwind` to avoid potentially losing
+        // test output on double panics.
+        let current_iteration = std::sync::Arc::new(AtomicUsize::new(1));
+        let result = {
+            let current_iteration = current_iteration.clone();
+            std::panic::catch_unwind(move || {
+                builder.check(move || {
+                    traceln(format_args!(
+                        "\n---- {} iteration {} ----",
+                        std::thread::current().name().unwrap_or("<unknown test>"),
+                        current_iteration.fetch_add(1, Ordering::Relaxed)
+                    ));
+
+                    model();
+                    // if this iteration succeeded, clear the buffer for the
+                    // next iteration...
+                    TRACE_BUF.with(|buf| buf.borrow_mut().clear());
+                })
+            })
+        };
+
+        if let Err(panic) = result {
+            TRACE_BUF
+                .try_with(|buf| {
+                    if let Ok(buf) = buf.try_borrow() {
+                        eprint!("{}", buf);
+                    } else {
+                        eprint!("trace buf already mutably borrowed?");
+                    }
+                })
+                .unwrap_or_else(|e| eprintln!("trace buf already torn down: {}", e));
+            eprintln!(
+                "test '{}' panicked after {} iterations!",
                 std::thread::current().name().unwrap_or("<unknown test>"),
-                current_iteration.fetch_add(1, Ordering::Relaxed)
-            ));
-            let _iter = Iteration(());
-
-            model();
-        })
+                current_iteration.load(Ordering::Relaxed),
+            );
+            std::panic::resume_unwind(panic);
+        }
     }
 
-    pub(crate) fn model(model: impl Fn() + Sync + Send + 'static) {
+    pub(crate) fn model(model: impl Fn() + std::panic::UnwindSafe + Sync + Send + 'static) {
         run_builder(loom::model::Builder::default(), model)
     }
 
