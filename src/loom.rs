@@ -35,15 +35,10 @@ mod inner {
         };
         use tracing_subscriber::{filter::Targets, fmt, prelude::*};
 
+        // set up tracing for loom.
+        const LOOM_LOG: &str = "LOOM_LOG";
+
         struct TracebufWriter;
-
-        impl<'a> fmt::writer::MakeWriter<'a> for TracebufWriter {
-            type Writer = Self;
-            fn make_writer(&'a self) -> Self::Writer {
-                TracebufWriter
-            }
-        }
-
         impl io::Write for TracebufWriter {
             fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
                 let len = buf.len();
@@ -58,9 +53,7 @@ mod inner {
             }
         }
 
-        const LOOM_LOG: &str = "LOOM_LOG";
-
-        if let Some(filter) = env::var(LOOM_LOG)
+        let filter = env::var(LOOM_LOG)
             .ok()
             .and_then(|var| match var.parse::<Targets>() {
                 Err(e) => {
@@ -69,15 +62,16 @@ mod inner {
                 }
                 Ok(targets) => Some(targets),
             })
-        {
-            let _ = fmt::Subscriber::builder()
-                .with_writer(TracebufWriter)
-                .without_time()
-                .finish()
-                .with(filter)
-                .try_init();
-        }
+            .unwrap_or_else(|| Targets::new().with_target("loom", tracing::Level::INFO));
+        let _ = fmt::Subscriber::builder()
+            .with_writer(|| TracebufWriter)
+            .without_time()
+            .finish()
+            .with(filter)
+            .try_init();
 
+        // wrap the loom model with `catch_unwind` to avoid potentially losing
+        // test output on double panics.
         let current_iteration = std::sync::Arc::new(AtomicUsize::new(1));
         let result = {
             let current_iteration = current_iteration.clone();
