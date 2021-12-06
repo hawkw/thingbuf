@@ -2,6 +2,7 @@ pub(crate) use self::inner::*;
 
 #[cfg(test)]
 mod inner {
+
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
@@ -9,6 +10,11 @@ mod inner {
 
     pub(crate) use loom::{cell::UnsafeCell, future, hint, sync, thread};
     use std::{cell::RefCell, fmt::Write};
+
+    pub(crate) mod model {
+        #[allow(unused_imports)]
+        pub(crate) use loom::model::Builder;
+    }
 
     std::thread_local! {
         static TRACE_BUF: RefCell<String> = RefCell::new(String::new());
@@ -25,6 +31,7 @@ mod inner {
             .unwrap_or_else(|_| println!("{}", args.take().unwrap()))
     }
 
+    #[track_caller]
     pub(crate) fn run_builder(
         builder: loom::model::Builder,
         model: impl Fn() + Sync + Send + std::panic::UnwindSafe + 'static,
@@ -98,11 +105,15 @@ mod inner {
         // wrap the loom model with `catch_unwind` to avoid potentially losing
         // test output on double panics.
         let current_iteration = std::sync::Arc::new(AtomicUsize::new(1));
+        let test_name = match std::thread::current().name() {
+            Some("main") | None => "test".to_string(),
+            Some(name) => name.to_string(),
+        };
         builder.check(move || {
+            let iteration = current_iteration.fetch_add(1, Ordering::Relaxed);
             traceln(format_args!(
                 "\n---- {} iteration {} ----",
-                std::thread::current().name().unwrap_or("<unknown test>"),
-                current_iteration.fetch_add(1, Ordering::Relaxed)
+                test_name, iteration,
             ));
 
             model();
@@ -112,12 +123,9 @@ mod inner {
         });
     }
 
+    #[track_caller]
     pub(crate) fn model(model: impl Fn() + std::panic::UnwindSafe + Sync + Send + 'static) {
-        let mut builder = loom::model::Builder::default();
-        // // A couple of our tests will hit the max number of branches riiiiight
-        // // before they should complete. Double it so this stops happening.
-        builder.max_branches *= 2;
-        run_builder(builder, model)
+        run_builder(Default::default(), model)
     }
 
     pub(crate) mod alloc {

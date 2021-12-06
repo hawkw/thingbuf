@@ -5,20 +5,19 @@ use crate::{
 };
 
 #[test]
-fn basically_works() {
+fn mpsc_try_send_recv() {
     loom::model(|| {
-        let (tx, rx) = channel(ThingBuf::new(4));
+        let (tx, rx) = channel(ThingBuf::new(3));
 
         let p1 = {
             let tx = tx.clone();
             thread::spawn(move || {
                 tx.try_send_ref().unwrap().with_mut(|val| *val = 1);
-                tx.try_send_ref().unwrap().with_mut(|val| *val = 2);
             })
         };
         let p2 = thread::spawn(move || {
+            tx.try_send(2).unwrap();
             tx.try_send(3).unwrap();
-            tx.try_send(4).unwrap();
         });
 
         let mut vals = future::block_on(async move {
@@ -30,7 +29,7 @@ fn basically_works() {
         });
 
         vals.sort_unstable();
-        assert_eq!(vals, vec![1, 2, 3, 4]);
+        assert_eq!(vals, vec![1, 2, 3]);
 
         p1.join().unwrap();
         p2.join().unwrap();
@@ -119,6 +118,128 @@ fn spsc_recv_then_send_then_close() {
         tx.try_send(20).unwrap();
         drop(tx);
         consumer.join().unwrap();
+    })
+}
+
+#[test]
+fn spsc_send_recv_in_order_no_wrap() {
+    const N_SENDS: usize = 4;
+    loom::model(|| {
+        let (tx, rx) = channel(ThingBuf::<usize>::new(N_SENDS));
+        let consumer = thread::spawn(move || {
+            future::block_on(async move {
+                for i in 1..=N_SENDS {
+                    assert_eq!(rx.recv().await, Some(i));
+                }
+                assert_eq!(rx.recv().await, None);
+            })
+        });
+        future::block_on(async move {
+            for i in 1..=N_SENDS {
+                tx.send(i).await.unwrap()
+            }
+        });
+        consumer.join().unwrap();
+    })
+}
+
+#[test]
+fn spsc_send_recv_in_order_wrap() {
+    const N_SENDS: usize = 2;
+    loom::model(|| {
+        let (tx, rx) = channel(ThingBuf::<usize>::new(N_SENDS / 2));
+        let consumer = thread::spawn(move || {
+            future::block_on(async move {
+                for i in 1..=N_SENDS {
+                    assert_eq!(rx.recv().await, Some(i));
+                }
+                assert_eq!(rx.recv().await, None);
+            })
+        });
+        future::block_on(async move {
+            for i in 1..=N_SENDS {
+                tx.send(i).await.unwrap()
+            }
+        });
+        consumer.join().unwrap();
+    })
+}
+
+#[test]
+fn mpsc_send_recv_wrap() {
+    loom::model(|| {
+        let (tx, rx) = channel(ThingBuf::<usize>::new(1));
+        let producer1 = do_producer(tx.clone(), 10);
+        let producer2 = do_producer(tx, 20);
+
+        let results = future::block_on(async move {
+            let mut results = Vec::new();
+            while let Some(val) = rx.recv().await {
+                test_println!("RECEIVED {:?}", val);
+                results.push(val);
+            }
+            results
+        });
+
+        producer1.join().expect("producer 1 panicked");
+        producer2.join().expect("producer 2 panicked");
+
+        assert_eq!(results.len(), 2);
+        assert!(
+            results.contains(&10),
+            "missing value from producer 1; results={:?}",
+            results
+        );
+
+        assert!(
+            results.contains(&20),
+            "missing value from producer 2; results={:?}",
+            results
+        );
+    })
+}
+
+#[test]
+fn mpsc_send_recv_no_wrap() {
+    loom::model(|| {
+        let (tx, rx) = channel(ThingBuf::<usize>::new(2));
+        let producer1 = do_producer(tx.clone(), 10);
+        let producer2 = do_producer(tx, 20);
+
+        let results = future::block_on(async move {
+            let mut results = Vec::new();
+            while let Some(val) = rx.recv().await {
+                test_println!("RECEIVED {:?}", val);
+                results.push(val);
+            }
+            results
+        });
+
+        producer1.join().expect("producer 1 panicked");
+        producer2.join().expect("producer 2 panicked");
+
+        assert_eq!(results.len(), 2);
+        assert!(
+            results.contains(&10),
+            "missing value from producer 1; results={:?}",
+            results
+        );
+
+        assert!(
+            results.contains(&20),
+            "missing value from producer 2; results={:?}",
+            results
+        );
+    })
+}
+
+fn do_producer(tx: Sender<usize>, tag: usize) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        future::block_on(async move {
+            test_println!("SENDING {:?}", tag);
+            tx.send(tag).await.unwrap();
+            test_println!("SENT {:?}", tag);
+        })
     })
 }
 

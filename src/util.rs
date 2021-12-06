@@ -21,8 +21,8 @@ pub(crate) struct CachePadded<T>(pub(crate) T);
 // === impl Backoff ===
 
 impl Backoff {
-    const MAX_SPINS: u8 = 6;
-    const MAX_YIELDS: u8 = 10;
+    const MAX_SPINS: u8 = 3;
+    const MAX_YIELDS: u8 = 6;
     #[inline]
     pub(crate) fn new() -> Self {
         Self(0)
@@ -30,7 +30,14 @@ impl Backoff {
 
     #[inline]
     pub(crate) fn spin(&mut self) {
+        #[cfg(not(test))]
         for _ in 0..test_dbg!(1 << self.0.min(Self::MAX_SPINS)) {
+            loom::hint::spin_loop();
+        }
+
+        #[cfg(test)]
+        {
+            test_println!("hint::spin_loop() (x{})", 1 << self.0.min(Self::MAX_SPINS));
             loom::hint::spin_loop();
         }
 
@@ -42,17 +49,25 @@ impl Backoff {
     #[inline]
     pub(crate) fn spin_yield(&mut self) {
         if self.0 <= Self::MAX_SPINS || cfg!(not(any(feature = "std", test))) {
+            #[cfg(not(test))]
             for _ in 0..1 << self.0 {
                 loom::hint::spin_loop();
             }
+
+            test_println!("hint::spin_loop() (x{})", 1 << self.0);
         }
 
+        test_println!("thread::yield_now()");
         #[cfg(any(test, feature = "std"))]
         loom::thread::yield_now();
 
         if self.0 <= Self::MAX_YIELDS {
             self.0 += 1;
         }
+    }
+
+    pub(crate) fn done_spinning(&self) -> bool {
+        self.0 >= Self::MAX_SPINS
     }
 }
 

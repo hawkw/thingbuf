@@ -7,8 +7,8 @@ use core::{fmt, ptr};
 mod tests;
 
 pub struct ThingBuf<T> {
-    core: Core,
-    slots: Box<[Slot<T>]>,
+    pub(crate) core: Core,
+    pub(crate) slots: Box<[Slot<T>]>,
 }
 
 // === impl ThingBuf ===
@@ -24,7 +24,10 @@ impl<T: Default> ThingBuf<T> {
     }
 
     pub fn push_ref(&self) -> Result<Ref<'_, T>, Full> {
-        self.core.push_ref(&*self.slots)
+        self.core.push_ref(&*self.slots).map_err(|e| match e {
+            crate::mpsc::TrySendError::Full(()) => Full(()),
+            _ => unreachable!(),
+        })
     }
 
     #[inline]
@@ -33,7 +36,7 @@ impl<T: Default> ThingBuf<T> {
     }
 
     pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
-        self.core.pop_ref(&*self.slots)
+        self.core.pop_ref(&*self.slots).ok()
     }
 
     #[inline]

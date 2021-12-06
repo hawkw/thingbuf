@@ -6,23 +6,17 @@
 use super::*;
 use crate::{
     loom::{
-        self,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{self, Ordering},
         sync::Arc,
         thread::{self, Thread},
     },
-    util::wait::{WaitCell, WaitResult},
     Ref, ThingBuf,
 };
 use core::fmt;
 
 /// Returns a new asynchronous multi-producer, single consumer channel.
 pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
-    let inner = Arc::new(Inner {
-        thingbuf,
-        rx_wait: WaitCell::new(),
-        tx_count: AtomicUsize::new(1),
-    });
+    let inner = Arc::new(Inner::new(thingbuf));
     let tx = Sender {
         inner: inner.clone(),
     };
@@ -44,6 +38,10 @@ impl_send_ref! {
     pub struct SendRef<Thread>;
 }
 
+impl_recv_ref! {
+    pub struct RecvRef<Thread>;
+}
+
 // === impl Sender ===
 
 impl<T: Default> Sender<T> {
@@ -53,6 +51,28 @@ impl<T: Default> Sender<T> {
 
     pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
         self.inner.try_send(val)
+    }
+
+    pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
+        loop {
+            // perform one send ref loop iteration
+            if let Poll::Ready(result) = self.inner.poll_send_ref(thread::current) {
+                return result.map(SendRef);
+            }
+
+            // if that iteration failed, park the thread.
+            thread::park();
+        }
+    }
+
+    pub fn send(&self, val: T) -> Result<(), Closed<T>> {
+        match self.send_ref() {
+            Err(Closed(())) => Err(Closed(val)),
+            Ok(mut slot) => {
+                slot.with_mut(|slot| *slot = val);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -72,43 +92,28 @@ impl<T> Drop for Sender<T> {
         }
 
         // if we are the last sender, synchronize
-        test_dbg!(self.inner.tx_count.load(Ordering::SeqCst));
-        self.inner.rx_wait.close_tx();
+        test_dbg!(atomic::fence(Ordering::SeqCst));
+        if self.inner.thingbuf.core.close() {
+            self.inner.rx_wait.close_tx();
+        }
     }
 }
 
 // === impl Receiver ===
 
 impl<T: Default> Receiver<T> {
-    pub fn recv_ref(&self) -> Option<Ref<'_, T>> {
+    pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
         loop {
-            // If we got a value, return it!
-            if let Some(r) = self.inner.thingbuf.pop_ref() {
-                return Some(r);
-            }
-
-            // otherwise, gotosleep
-            match test_dbg!(self.inner.rx_wait.wait_with(thread::current)) {
-                WaitResult::TxClosed => {
-                    // All senders have been dropped, but the channel might
-                    // still have messages in it...
-                    return self.inner.thingbuf.pop_ref();
+            match self.inner.poll_recv_ref(thread::current) {
+                Poll::Ready(r) => {
+                    return r.map(|slot| RecvRef {
+                        slot,
+                        inner: &*self.inner,
+                    })
                 }
-                WaitResult::Wait => {
-                    // make sure nobody sent a message while we were registering
-                    // the waiter...
-                    // XXX(eliza): a nicer solution _might_ just be to pack the
-                    // waiter state into the tail idx or something or something
-                    // but that kind of defeats the purpose of just having a
-                    // nice "wrap a queue into a channel" API...
-                    if let Some(val) = self.inner.thingbuf.pop_ref() {
-                        return Some(val);
-                    }
+                Poll::Pending => {
                     test_println!("parking ({:?})", thread::current());
                     thread::park();
-                }
-                WaitResult::Notified => {
-                    loom::hint::spin_loop();
                 }
             }
         }
@@ -129,7 +134,7 @@ impl<T: Default> Receiver<T> {
 }
 
 impl<'a, T: Default> Iterator for &'a Receiver<T> {
-    type Item = Ref<'a, T>;
+    type Item = RecvRef<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.recv_ref()
@@ -138,6 +143,6 @@ impl<'a, T: Default> Iterator for &'a Receiver<T> {
 
 impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
-        self.inner.rx_wait.close_rx();
+        self.inner.close_rx();
     }
 }
