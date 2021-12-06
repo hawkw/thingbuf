@@ -1,0 +1,84 @@
+on:
+ - push
+ - pull_request
+ - workflow_dispatch
+
+name: Loom Models
+
+env:
+  LOOM_MAX_PREEMPTIONS: 2
+  LOOM_LOG: loom=trace
+  RUSTFLAGS: "--cfg loom"
+
+jobs:
+  loom_mpsc_async:
+    name: "mpsc"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --profile loom --lib -- mpsc_async
+
+  loom_mpsc_sync:
+    name: "mpsc::sync"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --profile loom --lib -- mpsc_sync
+
+  loom_thingbuf:
+    name: "ThingBuf"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --profile loom --lib -- thingbuf
+
+  loom_util:
+    name: "util"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --profile loom --lib -- util

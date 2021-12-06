@@ -3,7 +3,7 @@ use crate::{Core, Full, Ref, Slot};
 use alloc::boxed::Box;
 use core::{fmt, ptr};
 
-#[cfg(test)]
+#[cfg(all(loom, test))]
 mod tests;
 
 pub struct ThingBuf<T> {
