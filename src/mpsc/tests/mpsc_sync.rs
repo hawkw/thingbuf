@@ -112,25 +112,18 @@ fn spsc_recv_then_try_send_then_close() {
 }
 
 #[test]
-fn mpsc_send_recv() {
-    // make this bigger at YOUR OWN RISK; this model takes like a gazillion
-    // years to run otherwise.
-    const N_SENDS: usize = 2;
-
-    fn do_producer(tx: sync::Sender<usize>, tag: usize) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
-            for i in 1..=N_SENDS {
-                test_println!("SENDING {:?}", i + tag);
-                tx.send(i + tag).unwrap();
-                test_println!("SENT {:?}", i + tag);
-            }
-        })
-    }
-
-    let mut builder = loom::model::Builder::default();
-    builder.max_branches = 10_000;
-    loom::run_builder(builder, || {
-        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS));
+// This test currently fails because `loom` implements the wrong semantics for
+// `Thread::unpark()`/`thread::park` (see
+// https://github.com/tokio-rs/loom/issues/246).
+// However, it implements the correct semantics for async `Waker`s (which
+// _should_ be the same as park/unpark), so the async version of this test more
+// or less verifies that the algorithm here is correct.
+//
+// TODO(eliza): when tokio-rs/loom#246 is fixed, we can re-enable this test!
+#[ignore]
+fn mpsc_send_recv_wrap() {
+    loom::model(|| {
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(1));
         let producer1 = do_producer(tx.clone(), 10);
         let producer2 = do_producer(tx, 20);
 
@@ -143,21 +136,57 @@ fn mpsc_send_recv() {
         producer1.join().expect("producer 1 panicked");
         producer2.join().expect("producer 2 panicked");
 
-        assert_eq!(results.len(), N_SENDS * 2);
-        for i in 1..=N_SENDS {
-            assert!(
-                results.contains(&(i + 10)),
-                "missing value from producer 1; i={:?}; results={:?}",
-                i,
-                results
-            );
-            assert!(
-                results.contains(&(i + 20)),
-                "missing value from producer 2; i={:?}; results={:?}",
-                i,
-                results
-            );
+        assert_eq!(results.len(), 2);
+        assert!(
+            results.contains(&10),
+            "missing value from producer 1; results={:?}",
+            results
+        );
+
+        assert!(
+            results.contains(&20),
+            "missing value from producer 2; results={:?}",
+            results
+        );
+    })
+}
+
+#[test]
+fn mpsc_send_recv_no_wrap() {
+    loom::model(|| {
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(2));
+        let producer1 = do_producer(tx.clone(), 10);
+        let producer2 = do_producer(tx, 20);
+
+        let mut results = Vec::new();
+        while let Some(val) = rx.recv() {
+            test_println!("RECEIVED {:?}", val);
+            results.push(val);
         }
+
+        producer1.join().expect("producer 1 panicked");
+        producer2.join().expect("producer 2 panicked");
+
+        assert_eq!(results.len(), 2);
+        assert!(
+            results.contains(&10),
+            "missing value from producer 1; results={:?}",
+            results
+        );
+
+        assert!(
+            results.contains(&20),
+            "missing value from producer 2; results={:?}",
+            results
+        );
+    })
+}
+
+fn do_producer(tx: sync::Sender<usize>, tag: usize) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        test_println!("SENDING {:?}", tag);
+        tx.send(tag).unwrap();
+        test_println!("SENT {:?}", tag);
     })
 }
 
