@@ -43,6 +43,7 @@ fn rx_closes() {
 
         let producer = thread::spawn(move || {
             'iters: for i in 0..=ITERATIONS {
+                test_println!("sending {}", i);
                 'send: loop {
                     match tx.try_send(i) {
                         Ok(_) => break 'send,
@@ -126,7 +127,9 @@ fn mpsc_send_recv() {
         })
     }
 
-    loom::model(|| {
+    let mut builder = loom::model::Builder::default();
+    builder.max_branches = 10_000;
+    loom::run_builder(builder, || {
         let (tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS));
         let producer1 = do_producer(tx.clone(), 10);
         let producer2 = do_producer(tx, 20);

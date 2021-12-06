@@ -22,7 +22,7 @@ use core::fmt;
 use core::task::Poll;
 
 #[cfg(feature = "alloc")]
-use crate::util::wait::WaitQueue;
+use crate::util::wait::{NotifyOnDrop, WaitQueue};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -35,12 +35,12 @@ pub enum TrySendError<T = ()> {
 pub struct Closed<T = ()>(T);
 
 #[derive(Debug)]
-struct Inner<T, N> {
+struct Inner<T, N: Notify> {
     thingbuf: ThingBuf<T>,
     rx_wait: WaitCell<N>,
     tx_count: AtomicUsize,
     #[cfg(feature = "alloc")]
-    tx_wait: WaitQueue<N>,
+    tx_wait: WaitQueue<NotifyOnDrop<N>>,
 }
 
 struct SendRefInner<'a, T, N: Notify> {
@@ -60,7 +60,7 @@ impl TrySendError {
 }
 
 // ==== impl Inner ====
-impl<T, N> Inner<T, N> {
+impl<T, N: Notify> Inner<T, N> {
     fn new(thingbuf: ThingBuf<T>) -> Self {
         Self {
             thingbuf,
@@ -70,21 +70,22 @@ impl<T, N> Inner<T, N> {
             tx_wait: WaitQueue::new(),
         }
     }
+
+    fn close_rx(&self) {
+        if self.thingbuf.core.close() {
+            crate::loom::hint::spin_loop();
+            test_println!("draining_queue");
+            self.tx_wait.drain();
+        }
+    }
 }
 
 impl<T: Default, N: Notify> Inner<T, N> {
     fn try_send_ref(&self) -> Result<SendRefInner<'_, T, N>, TrySendError> {
         self.thingbuf
-            .push_ref()
+            .core
+            .push_ref(self.thingbuf.slots.as_ref())
             .map(|slot| SendRefInner { inner: self, slot })
-            .map_err(|_| {
-                if self.rx_wait.is_rx_closed() {
-                    TrySendError::Closed(())
-                } else {
-                    self.rx_wait.notify();
-                    TrySendError::Full(())
-                }
-            })
     }
 
     fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
@@ -104,33 +105,34 @@ impl<T: Default, N: Notify> Inner<T, N> {
     /// may yield, or might park the thread.
     fn poll_send_ref(
         &self,
-        mk_waiter: impl FnOnce() -> N,
+        mk_waiter: impl Fn() -> N,
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
         let mut backoff = Backoff::new();
-        // try to send a few times in a spin loop, in case the receiver is
-        // currently reading from the channel.
-        while !backoff.done_yelding() {
-            match self.thingbuf.push_ref() {
-                Ok(slot) => return Poll::Ready(Ok(SendRefInner { slot, inner: self })),
-                Err(_) if self.rx_wait.is_rx_closed() => return Poll::Ready(Err(Closed(()))),
+        loop {
+            // try to send a few times in a spin loop, in case the receiver is
+            // currently reading from the channel.
+            // while !backoff.done_spinning() {
+            match self.try_send_ref() {
+                Ok(slot) => return Poll::Ready(Ok(slot)),
+                Err(TrySendError::Closed(_)) => return Poll::Ready(Err(Closed(()))),
                 Err(_) => {}
             }
-            backoff.spin_yield();
-        }
 
-        if let Some(mut q) = self.tx_wait.lock() {
-            let current = mk_waiter();
-            test_println!("parking sender ({:?})", current);
-            q.push_waiter(current);
-        } else {
-            return Poll::Ready(Err(Closed(())));
-        }
+            //     self.rx_wait.notify();
+            //     backoff.spin_yield();
+            // }
+            let pushed_waiter = self.tx_wait.push_waiter(|| {
+                let current = mk_waiter();
+                test_println!("parking sender ({:?})", current);
+                NotifyOnDrop::new(current)
+            });
 
-        // park the thread ONLY AFTER RELEASING THE WAIT QUEUE LOCK.
-        // otherwise, this could deadlock!
-        self.rx_wait.notify();
-        // okay, tell the `send_ref` loop it's time to park for this iteration.
-        Poll::Pending
+            match test_dbg!(pushed_waiter) {
+                WaitResult::Notified => backoff.spin_yield(),
+                WaitResult::TxClosed => return Poll::Ready(Err(Closed(()))),
+                WaitResult::Wait => return Poll::Pending,
+            }
+        }
     }
 
     /// Performs one iteration of the `recv_ref` loop.
@@ -139,31 +141,30 @@ impl<T: Default, N: Notify> Inner<T, N> {
     /// implementation, rather than on `inner`, because it might be async and
     /// may yield, or might park the thread.
     fn poll_recv_ref(&self, mk_waiter: impl Fn() -> N) -> Poll<Option<Ref<'_, T>>> {
+        macro_rules! try_poll_recv {
+            () => {
+                // If we got a value, return it!
+                match self.thingbuf.core.pop_ref(self.thingbuf.slots.as_ref()) {
+                    Ok(slot) => return Poll::Ready(Some(slot)),
+                    Err(TrySendError::Closed(_)) => return Poll::Ready(None),
+                    _ => {}
+                }
+            };
+        }
+
+        test_dbg!("poll_recv_ref");
         loop {
-            // If we got a value, return it!
-            if let Some(slot) = self.thingbuf.pop_ref() {
-                return Poll::Ready(Some(slot));
-            }
+            test_dbg!("poll_recv_ref => loop");
+            try_poll_recv!();
 
             // otherwise, gotosleep
             match test_dbg!(self.rx_wait.wait_with(&mk_waiter)) {
-                WaitResult::TxClosed => {
-                    // All senders have been dropped, but the channel might
-                    // still have messages in it...
-                    return Poll::Ready(self.thingbuf.pop_ref());
-                }
                 WaitResult::Wait => {
-                    // // make sure nobody sent a message while we were registering
-                    // // the waiter...
-                    // // XXX(eliza): a nicer solution _might_ just be to pack the
-                    // // waiter state into the tail idx or something or something
-                    // // but that kind of defeats the purpose of just having a
-                    // // nice "wrap a queue into a channel" API...
-                    // if let Some(slot) = self.thingbuf.pop_ref() {
-                    //     return Poll::Ready(Some(slot));
-                    // }
+                    try_poll_recv!();
+                    test_dbg!(self.tx_wait.notify());
                     return Poll::Pending;
                 }
+                WaitResult::TxClosed => return Poll::Ready(self.thingbuf.pop_ref()),
                 WaitResult::Notified => {
                     hint::spin_loop();
                 }

@@ -6,7 +6,7 @@
 use super::*;
 use crate::{
     loom::{
-        atomic::Ordering,
+        atomic::{self, Ordering},
         sync::Arc,
         thread::{self, Thread},
     },
@@ -92,8 +92,10 @@ impl<T> Drop for Sender<T> {
         }
 
         // if we are the last sender, synchronize
-        test_dbg!(self.inner.tx_count.load(Ordering::SeqCst));
-        self.inner.rx_wait.close_tx();
+        test_dbg!(atomic::fence(Ordering::SeqCst));
+        if self.inner.thingbuf.core.close() {
+            self.inner.rx_wait.close_tx();
+        }
     }
 }
 
@@ -141,6 +143,6 @@ impl<'a, T: Default> Iterator for &'a Receiver<T> {
 
 impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
-        self.inner.rx_wait.close_rx();
+        self.inner.close_rx();
     }
 }

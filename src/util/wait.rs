@@ -16,9 +16,12 @@ use crate::loom::thread;
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum WaitResult {
     Wait,
-    Notified,
     TxClosed,
+    Notified,
 }
+
+#[derive(Debug)]
+pub(crate) struct NotifyOnDrop<T: Notify>(Option<T>);
 
 pub(crate) trait Notify: UnwindSafe + fmt::Debug {
     fn notify(self);
@@ -36,5 +39,25 @@ impl Notify for Waker {
     fn notify(self) {
         test_println!("WAKING TASK {:?} (from {:?})", self, thread::current());
         self.wake();
+    }
+}
+
+impl<T: Notify> NotifyOnDrop<T> {
+    pub(crate) fn new(notify: T) -> Self {
+        Self(Some(notify))
+    }
+}
+
+impl<T: Notify> Notify for NotifyOnDrop<T> {
+    fn notify(self) {
+        drop(self)
+    }
+}
+
+impl<T: Notify> Drop for NotifyOnDrop<T> {
+    fn drop(&mut self) {
+        if let Some(notify) = self.0.take() {
+            notify.notify();
+        }
     }
 }

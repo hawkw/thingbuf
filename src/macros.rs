@@ -42,6 +42,21 @@ macro_rules! feature {
     }
 }
 
+macro_rules! fmt_bits {
+    ($self: expr, $f: expr, $has_states: ident, $($name: ident),+) => {
+        $(
+            if $self.contains(Self::$name) {
+                if $has_states {
+                    $f.write_str(" | ")?;
+                }
+                $f.write_str(stringify!($name))?;
+                $has_states = true;
+            }
+        )+
+
+    };
+}
+
 #[allow(unused_macros)]
 macro_rules! unreachable_unchecked {
     ($($arg:tt)+) => {

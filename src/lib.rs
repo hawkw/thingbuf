@@ -26,7 +26,7 @@ pub use self::static_thingbuf::StaticThingBuf;
 
 use crate::{
     loom::{
-        atomic::{self, AtomicUsize, Ordering::*},
+        atomic::{AtomicUsize, Ordering::*},
         UnsafeCell,
     },
     util::{Backoff, CachePadded},
@@ -46,6 +46,7 @@ struct Core {
     gen: usize,
     gen_mask: usize,
     idx_mask: usize,
+    closed: usize,
     capacity: usize,
 }
 
@@ -57,14 +58,16 @@ struct Slot<T> {
 impl Core {
     #[cfg(not(test))]
     const fn new(capacity: usize) -> Self {
-        let gen = (capacity + 1).next_power_of_two();
-        let idx_mask = gen - 1;
-        let gen_mask = !(gen - 1);
+        let closed = (capacity + 1).next_power_of_two();
+        let idx_mask = closed - 1;
+        let gen = closed << 1;
+        let gen_mask = !(closed | idx_mask);
         Self {
             head: CachePadded(AtomicUsize::new(0)),
             tail: CachePadded(AtomicUsize::new(0)),
             gen,
             gen_mask,
+            closed,
             idx_mask,
             capacity,
         }
@@ -72,13 +75,15 @@ impl Core {
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
-        let gen = (capacity + 1).next_power_of_two();
-        let idx_mask = gen - 1;
-        let gen_mask = !(gen - 1);
+        let closed = (capacity + 1).next_power_of_two();
+        let idx_mask = closed - 1;
+        let gen = closed << 1;
+        let gen_mask = !(closed | idx_mask);
         Self {
             head: CachePadded(AtomicUsize::new(0)),
             tail: CachePadded(AtomicUsize::new(0)),
             gen,
+            closed,
             gen_mask,
             idx_mask,
             capacity,
@@ -109,7 +114,17 @@ impl Core {
         self.capacity
     }
 
-    fn push_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, Full<()>>
+    fn close(&self) -> bool {
+        if std::thread::panicking() {
+            return false;
+        }
+        test_dbg!(self.tail.fetch_or(self.closed, SeqCst) & self.closed == 0)
+    }
+
+    fn push_ref<'slots, T, S>(
+        &self,
+        slots: &'slots S,
+    ) -> Result<Ref<'slots, T>, mpsc::TrySendError<()>>
     where
         T: Default,
         S: Index<usize, Output = Slot<T>> + ?Sized,
@@ -119,11 +134,14 @@ impl Core {
         let mut tail = self.tail.load(Relaxed);
 
         loop {
+            if test_dbg!(tail & self.closed != 0) {
+                return Err(mpsc::TrySendError::Closed(()));
+            }
             let (idx, gen) = self.idx_gen(tail);
             test_dbg!(idx);
             test_dbg!(gen);
             let slot = &slots[idx];
-            let actual_state = test_dbg!(slot.state.load(Acquire));
+            let actual_state = test_dbg!(slot.state.load(SeqCst));
             let state = if actual_state == EMPTY_STATE {
                 idx
             } else {
@@ -165,11 +183,17 @@ impl Core {
             }
 
             if test_dbg!(state.wrapping_add(self.gen) == tail + 1) {
-                test_dbg!(atomic::fence(SeqCst));
-                let head = test_dbg!(self.head.load(Relaxed));
+                // fake RMW op to placate loom. this should be equivalent to
+                // doing a relaxed load after a SeqCst fence (per Godbolt
+                // https://godbolt.org/z/zb15qfEa9), however, loom understands
+                // this correctly, while it does not understand an explicit
+                // SeqCst fence and a load.
+                // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
+                // load it gets reordered differently in the model checker lmao...
+                let head = test_dbg!(self.head.fetch_or(0, SeqCst));
                 if test_dbg!(head.wrapping_add(self.gen) == tail) {
                     test_println!("channel full");
-                    return Err(Full(()));
+                    return Err(mpsc::TrySendError::Full(()));
                 }
 
                 backoff.spin();
@@ -177,11 +201,11 @@ impl Core {
                 backoff.spin_yield();
             }
 
-            tail = test_dbg!(self.tail.load(Relaxed));
+            tail = test_dbg!(self.tail.fetch_or(0, SeqCst));
         }
     }
 
-    fn pop_ref<'slots, T, S>(&self, slots: &'slots S) -> Option<Ref<'slots, T>>
+    fn pop_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, mpsc::TrySendError>
     where
         S: Index<usize, Output = Slot<T>> + ?Sized,
     {
@@ -195,7 +219,7 @@ impl Core {
             test_dbg!(idx);
             test_dbg!(gen);
             let slot = &slots[idx];
-            let state = test_dbg!(slot.state.load(Acquire));
+            let state = test_dbg!(slot.state.fetch_or(0, SeqCst));
             let state = if state == EMPTY_STATE { idx } else { state };
 
             // If the slot's state is ahead of the head index by one, we can pop
@@ -208,7 +232,7 @@ impl Core {
                 {
                     Ok(_) => {
                         test_println!("claimed head slot [{}]", idx);
-                        return Some(Ref {
+                        return Ok(Ref {
                             new_state: head.wrapping_add(self.gen),
                             slot,
                         });
@@ -222,21 +246,33 @@ impl Core {
             }
 
             if test_dbg!(state == head) {
-                test_dbg!(atomic::fence(SeqCst));
-                let tail = test_dbg!(self.tail.load(Relaxed));
+                // fake RMW op to placate loom. this should be equivalent to
+                // doing a relaxed load after a SeqCst fence (per Godbolt
+                // https://godbolt.org/z/zb15qfEa9), however, loom understands
+                // this correctly, while it does not understand an explicit
+                // SeqCst fence and a load.
+                // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
+                // load it gets reordered differently in the model checker lmao...
+                let tail = test_dbg!(self.tail.fetch_or(0, SeqCst));
 
-                if test_dbg!(tail == head) {
-                    return None;
+                if test_dbg!(tail & !self.closed == head) {
+                    return if test_dbg!(tail & self.closed != 0) {
+                        Err(mpsc::TrySendError::Closed(()))
+                    } else {
+                        Err(mpsc::TrySendError::Full(()))
+                    };
+                }
+
+                if test_dbg!(backoff.done_spinning()) {
+                    return Err(mpsc::TrySendError::Full(()));
                 }
 
                 backoff.spin();
-            // } else if test_dbg!(backoff.done_yelding()) {
-            //     return None;
             } else {
                 backoff.spin_yield();
             }
 
-            head = test_dbg!(self.head.load(Relaxed));
+            head = test_dbg!(self.head.fetch_or(0, SeqCst));
         }
     }
 
@@ -258,6 +294,20 @@ impl Core {
         }
     }
 }
+
+// impl fmt::Debug for Core {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         f.debug_struct("Core")
+//             .field("head", &self.head)
+//             .field("tail", &self.tail)
+//             .field("capacity", &self.capacity)
+//             .field("gen", &format_args!("{:#066b}", self.gen))
+//             .field("gen_mask", &format_args!("{:#066b}", self.gen_mask))
+//             .field("idx_mask", &format_args!("{:#066b}", self.idx_mask))
+//             .field("closed", &format_args!("{:#066b}", self.closed))
+//             .finish()
+//     }
+// }
 
 // === impl Ref ===
 
@@ -294,7 +344,7 @@ impl<T> Ref<'_, T> {
         }
 
         test_println!("release_ref");
-        self.slot.state.store(test_dbg!(self.new_state), Release);
+        test_dbg!(self.slot.state.swap(test_dbg!(self.new_state), SeqCst));
         self.new_state = Self::RELEASED;
     }
 }

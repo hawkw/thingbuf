@@ -71,7 +71,7 @@ impl Backoff {
     }
 
     pub(crate) fn done_yelding(&self) -> bool {
-        self.0 >= Self::MAX_YIELDS
+        test_dbg!(self.0) > Self::MAX_YIELDS
     }
 }
 

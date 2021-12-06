@@ -56,26 +56,18 @@ impl<T> WaitCell<T> {
 }
 
 impl<T: Notify> WaitCell<T> {
-    pub(crate) fn close_rx(&self) {
-        test_dbg!(self.fetch_or(State::RX_CLOSED, AcqRel));
-    }
-
-    pub(crate) fn is_rx_closed(&self) -> bool {
-        test_dbg!(self.current_state().contains(State::RX_CLOSED))
-    }
-
     pub(crate) fn wait_with(&self, f: impl FnOnce() -> T) -> WaitResult {
         test_println!("registering waiter");
 
         // this is based on tokio's AtomicWaker synchronization strategy
-        match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING)) {
+        match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING, Acquire)) {
             // someone else is notifying the receiver, so don't park!
             Err(actual) if test_dbg!(actual.contains(State::TX_CLOSED)) => {
                 return WaitResult::TxClosed;
             }
             Err(actual) if test_dbg!(actual.contains(State::NOTIFYING)) => {
-                // f().notify();
-                // loom::hint::spin_loop();
+                f().notify();
+                crate::loom::hint::spin_loop();
                 return WaitResult::Notified;
             }
 
@@ -100,7 +92,8 @@ impl<T: Notify> WaitCell<T> {
             Err(panic) => (Some(panic), None),
         };
 
-        let result = match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING)) {
+        let result = match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING, AcqRel))
+        {
             Ok(_) => {
                 let _ = panic::catch_unwind(move || drop(prev_waiter));
 
@@ -111,7 +104,7 @@ impl<T: Notify> WaitCell<T> {
                 let waiter = self.waiter.with_mut(|waiter| unsafe { (*waiter).take() });
                 // Reset to the WAITING state by clearing everything *except*
                 // the closed bits (which must remain set).
-                let state = test_dbg!(self.fetch_and(State::TX_CLOSED | State::RX_CLOSED, AcqRel));
+                let state = test_dbg!(self.fetch_and(State::TX_CLOSED, AcqRel));
                 // The only valid state transition while we were parking is to
                 // add the TX_CLOSED bit.
                 debug_assert!(
@@ -178,9 +171,14 @@ impl<T: Notify> WaitCell<T> {
 
 impl<T> WaitCell<T> {
     #[inline(always)]
-    fn compare_exchange(&self, State(curr): State, State(new): State) -> Result<State, State> {
+    fn compare_exchange(
+        &self,
+        State(curr): State,
+        State(new): State,
+        success: Ordering,
+    ) -> Result<State, State> {
         self.lock
-            .compare_exchange(curr, new, AcqRel, Acquire)
+            .compare_exchange(curr, new, success, Acquire)
             .map(State)
             .map_err(State)
     }
@@ -221,7 +219,6 @@ impl State {
     const PARKING: Self = Self(0b01);
     const NOTIFYING: Self = Self(0b10);
     const TX_CLOSED: Self = Self(0b100);
-    const RX_CLOSED: Self = Self(0b1000);
 
     fn contains(self, Self(state): Self) -> bool {
         self.0 & state == state
@@ -247,22 +244,8 @@ impl ops::Not for State {
 impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut has_states = false;
-        macro_rules! f_bits {
-            ($self: expr, $f: expr, $has_states: ident, $($name: ident),+) => {
-                $(
-                    if $self.contains(Self::$name) {
-                        if $has_states {
-                            $f.write_str(" | ")?;
-                        }
-                        $f.write_str(stringify!($name))?;
-                        $has_states = true;
-                    }
-                )+
 
-            };
-        }
-
-        f_bits!(self, f, has_states, PARKING, NOTIFYING, TX_CLOSED, RX_CLOSED);
+        fmt_bits!(self, f, has_states, PARKING, NOTIFYING, TX_CLOSED);
 
         if !has_states {
             if *self == Self::WAITING {
@@ -277,7 +260,6 @@ impl fmt::Debug for State {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
