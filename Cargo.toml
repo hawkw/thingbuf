@@ -13,15 +13,21 @@ default = ["std"]
 [dependencies]
 
 [dev-dependencies]
+tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros"] }
+# So that we can use `poll_fn` in tests.
+futures = "0.3"
+
+[target.'cfg(loom)'.dev-dependencies]
 loom = { version = "0.5.3", features = ["checkpoint", "futures"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
-# So that we can use `poll_fn` in tests.
-futures = "0.3"
+
+[target.'cfg(bench)'.dev-dependencies]
 criterion = { version = "0.3.5", features = ["async_tokio"] }
+
 # for comparison benchmarks
+tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 crossbeam = "0.8.1"
-tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "sync", "macros"] }
 async-std = "1"
 
 # Custom profile for Loom tests: enable release optimizations so that the loom
