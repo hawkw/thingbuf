@@ -14,20 +14,19 @@ use crate::{
 //
 // TODO(eliza): when tokio-rs/loom#246 is fixed, we can re-enable this test!
 #[ignore]
-fn basically_works() {
+fn mpsc_try_send_recv() {
     loom::model(|| {
-        let (tx, rx) = sync::channel(ThingBuf::new(4));
+        let (tx, rx) = sync::channel(ThingBuf::new(3));
 
         let p1 = {
             let tx = tx.clone();
             thread::spawn(move || {
                 tx.try_send_ref().unwrap().with_mut(|val| *val = 1);
-                tx.try_send_ref().unwrap().with_mut(|val| *val = 2);
             })
         };
         let p2 = thread::spawn(move || {
+            tx.try_send(2).unwrap();
             tx.try_send(3).unwrap();
-            tx.try_send(4).unwrap();
         });
 
         let mut vals = Vec::new();
@@ -37,7 +36,7 @@ fn basically_works() {
         }
 
         vals.sort_unstable();
-        assert_eq!(vals, vec![1, 2, 3, 4]);
+        assert_eq!(vals, vec![1, 2, 3]);
 
         p1.join().unwrap();
         p2.join().unwrap();
