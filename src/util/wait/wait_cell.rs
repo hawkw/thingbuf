@@ -38,7 +38,7 @@ struct State(usize);
 
 // === impl WaitCell ===
 impl<T> WaitCell<T> {
-    #[cfg(not(test))]
+    #[cfg(not(all(loom, test)))]
     pub(crate) const fn new() -> Self {
         Self {
             lock: AtomicUsize::new(State::WAITING.0),
@@ -46,7 +46,7 @@ impl<T> WaitCell<T> {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(loom, test))]
     pub(crate) fn new() -> Self {
         Self {
             lock: AtomicUsize::new(State::WAITING.0),
@@ -260,7 +260,7 @@ impl fmt::Debug for State {
         Ok(())
     }
 }
-#[cfg(test)]
+#[cfg(all(loom, test))]
 mod tests {
     use super::*;
     use crate::loom::{

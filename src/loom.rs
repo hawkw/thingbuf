@@ -1,6 +1,6 @@
 pub(crate) use self::inner::*;
 
-#[cfg(test)]
+#[cfg(all(test, loom))]
 mod inner {
 
     pub(crate) mod atomic {
@@ -105,6 +105,7 @@ mod inner {
         // wrap the loom model with `catch_unwind` to avoid potentially losing
         // test output on double panics.
         let current_iteration = std::sync::Arc::new(AtomicUsize::new(1));
+        let iteration = current_iteration.clone();
         let test_name = match std::thread::current().name() {
             Some("main") | None => "test".to_string(),
             Some(name) => name.to_string(),
@@ -121,6 +122,7 @@ mod inner {
             // next iteration...
             TRACE_BUF.with(|buf| buf.borrow_mut().clear());
         });
+        print!("({} iterations) ", iteration.load(Ordering::Relaxed));
     }
 
     #[track_caller]
@@ -178,7 +180,7 @@ mod inner {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(not(all(loom, test)))]
 mod inner {
     #![allow(dead_code)]
     pub(crate) mod sync {

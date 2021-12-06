@@ -56,7 +56,7 @@ struct Slot<T> {
 }
 
 impl Core {
-    #[cfg(not(test))]
+    #[cfg(not(all(loom, test)))]
     const fn new(capacity: usize) -> Self {
         let closed = (capacity + 1).next_power_of_two();
         let idx_mask = closed - 1;
@@ -73,7 +73,7 @@ impl Core {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(loom, test))]
     fn new(capacity: usize) -> Self {
         let closed = (capacity + 1).next_power_of_two();
         let idx_mask = closed - 1;
@@ -377,7 +377,7 @@ impl<T: fmt::Write> fmt::Write for Ref<'_, T> {
 const EMPTY_STATE: usize = usize::MAX;
 
 impl<T> Slot<T> {
-    #[cfg(not(test))]
+    #[cfg(not(all(loom, test)))]
     const fn empty() -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
@@ -385,7 +385,7 @@ impl<T> Slot<T> {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(loom, test))]
     fn empty() -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),

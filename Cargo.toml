@@ -24,8 +24,13 @@ crossbeam = "0.8.1"
 tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "sync", "macros"] }
 async-std = "1"
 
-[profile.test]
+# Custom profile for Loom tests: enable release optimizations so that the loom
+# tests are less slow, but don't disable debug assertions.
+[profile.loom]
+inherits = "test"
+lto = true
 opt-level = 3
+
 [[bench]]
 name = "sync_mpsc"
 harness = false

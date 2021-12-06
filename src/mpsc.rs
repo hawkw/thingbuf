@@ -357,5 +357,5 @@ feature! {
     pub mod sync;
 }
 
-#[cfg(test)]
+#[cfg(all(loom, test))]
 mod tests;
