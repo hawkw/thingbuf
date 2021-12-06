@@ -120,9 +120,6 @@ mod inner {
             // if this iteration succeeded, clear the buffer for the
             // next iteration...
             TRACE_BUF.with(|buf| buf.borrow_mut().clear());
-            if iteration % 100 == 0 {
-                println!("{} iteration {} passed", test_name, iteration);
-            }
         });
     }
 
