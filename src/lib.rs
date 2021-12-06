@@ -141,7 +141,7 @@ impl Core {
             test_dbg!(idx);
             test_dbg!(gen);
             let slot = &slots[idx];
-            let actual_state = test_dbg!(slot.state.load(SeqCst));
+            let actual_state = test_dbg!(slot.state.load(Acquire));
             let state = if actual_state == EMPTY_STATE {
                 idx
             } else {
@@ -201,7 +201,7 @@ impl Core {
                 backoff.spin_yield();
             }
 
-            tail = test_dbg!(self.tail.fetch_or(0, SeqCst));
+            tail = test_dbg!(self.tail.load(Acquire));
         }
     }
 
@@ -219,7 +219,7 @@ impl Core {
             test_dbg!(idx);
             test_dbg!(gen);
             let slot = &slots[idx];
-            let state = test_dbg!(slot.state.fetch_or(0, SeqCst));
+            let state = test_dbg!(slot.state.load(Acquire));
             let state = if state == EMPTY_STATE { idx } else { state };
 
             // If the slot's state is ahead of the head index by one, we can pop
@@ -253,6 +253,7 @@ impl Core {
                 // SeqCst fence and a load.
                 // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
                 // load it gets reordered differently in the model checker lmao...
+
                 let tail = test_dbg!(self.tail.fetch_or(0, SeqCst));
 
                 if test_dbg!(tail & !self.closed == head) {
@@ -272,7 +273,7 @@ impl Core {
                 backoff.spin_yield();
             }
 
-            head = test_dbg!(self.head.fetch_or(0, SeqCst));
+            head = test_dbg!(self.head.load(Acquire));
         }
     }
 
@@ -294,20 +295,6 @@ impl Core {
         }
     }
 }
-
-// impl fmt::Debug for Core {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         f.debug_struct("Core")
-//             .field("head", &self.head)
-//             .field("tail", &self.tail)
-//             .field("capacity", &self.capacity)
-//             .field("gen", &format_args!("{:#066b}", self.gen))
-//             .field("gen_mask", &format_args!("{:#066b}", self.gen_mask))
-//             .field("idx_mask", &format_args!("{:#066b}", self.idx_mask))
-//             .field("closed", &format_args!("{:#066b}", self.closed))
-//             .finish()
-//     }
-// }
 
 // === impl Ref ===
 
@@ -344,7 +331,7 @@ impl<T> Ref<'_, T> {
         }
 
         test_println!("release_ref");
-        test_dbg!(self.slot.state.swap(test_dbg!(self.new_state), SeqCst));
+        test_dbg!(self.slot.state.store(test_dbg!(self.new_state), Release));
         self.new_state = Self::RELEASED;
     }
 }
