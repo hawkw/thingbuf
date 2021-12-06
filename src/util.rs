@@ -69,10 +69,6 @@ impl Backoff {
     pub(crate) fn done_spinning(&self) -> bool {
         self.0 >= Self::MAX_SPINS
     }
-
-    pub(crate) fn done_yelding(&self) -> bool {
-        test_dbg!(self.0) > Self::MAX_YIELDS
-    }
 }
 
 // === impl CachePadded ===

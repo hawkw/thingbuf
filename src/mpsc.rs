@@ -108,19 +108,18 @@ impl<T: Default, N: Notify> Inner<T, N> {
         mk_waiter: impl Fn() -> N,
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
         let mut backoff = Backoff::new();
+        // try to send a few times in a loop, in case the receiver notifies us
+        // right before we park.
         loop {
-            // try to send a few times in a spin loop, in case the receiver is
-            // currently reading from the channel.
-            // while !backoff.done_spinning() {
+            // try to reserve a send slot, returning if we succeeded or if the
+            // queue was closed.
             match self.try_send_ref() {
                 Ok(slot) => return Poll::Ready(Ok(slot)),
                 Err(TrySendError::Closed(_)) => return Poll::Ready(Err(Closed(()))),
                 Err(_) => {}
             }
 
-            //     self.rx_wait.notify();
-            //     backoff.spin_yield();
-            // }
+            // try to push a waiter
             let pushed_waiter = self.tx_wait.push_waiter(|| {
                 let current = mk_waiter();
                 test_println!("parking sender ({:?})", current);
@@ -128,9 +127,18 @@ impl<T: Default, N: Notify> Inner<T, N> {
             });
 
             match test_dbg!(pushed_waiter) {
-                WaitResult::Notified => backoff.spin_yield(),
-                WaitResult::TxClosed => return Poll::Ready(Err(Closed(()))),
-                WaitResult::Wait => return Poll::Pending,
+                WaitResult::TxClosed => {
+                    // the channel closed while we were registering the waiter!
+                    return Poll::Ready(Err(Closed(())));
+                }
+                WaitResult::Wait => {
+                    // okay, we are now queued to wait. gotosleep!
+                    return Poll::Pending;
+                }
+                WaitResult::Notified => {
+                    // we consumed a queued notification. try again...
+                    backoff.spin_yield();
+                }
             }
         }
     }
@@ -152,20 +160,33 @@ impl<T: Default, N: Notify> Inner<T, N> {
             };
         }
 
-        test_dbg!("poll_recv_ref");
+        test_println!("poll_recv_ref");
         loop {
-            test_dbg!("poll_recv_ref => loop");
+            test_println!("poll_recv_ref => loop");
+
+            // try to receive a reference, returning if we succeeded or the
+            // channel is closed.
             try_poll_recv!();
 
             // otherwise, gotosleep
             match test_dbg!(self.rx_wait.wait_with(&mk_waiter)) {
                 WaitResult::Wait => {
+                    // we successfully registered a waiter! try polling again,
+                    // just in case someone sent a message while we were
+                    // registering the waiter.
                     try_poll_recv!();
                     test_dbg!(self.tx_wait.notify());
                     return Poll::Pending;
                 }
-                WaitResult::TxClosed => return Poll::Ready(self.thingbuf.pop_ref()),
+                WaitResult::TxClosed => {
+                    // the channel is closed (all the receivers are dropped).
+                    // however, there may be messages left in the queue. try
+                    // popping from the queue until it's empty.
+                    return Poll::Ready(self.thingbuf.pop_ref());
+                }
                 WaitResult::Notified => {
+                    // we were notified while we were trying to register the
+                    // waiter. loop and try polling again.
                     hint::spin_loop();
                 }
             }

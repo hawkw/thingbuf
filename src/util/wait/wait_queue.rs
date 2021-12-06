@@ -73,12 +73,6 @@ impl<T> WaitQueue<T> {
         res
     }
 
-    fn fetch_set(&self, state: State, order: Ordering) -> State {
-        let res = State(self.locked.fetch_or(state.0, order));
-        test_println!("self.state.fetch_set({:?}, {:?}) = {:?}", state, order, res);
-        res
-    }
-
     fn lock(&self) -> Result<Locked<'_, T>, State> {
         let mut backoff = Backoff::new();
         let mut state = State(self.locked.load(Ordering::Relaxed));

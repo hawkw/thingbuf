@@ -2,6 +2,7 @@ pub(crate) use self::inner::*;
 
 #[cfg(test)]
 mod inner {
+
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
@@ -11,6 +12,7 @@ mod inner {
     use std::{cell::RefCell, fmt::Write};
 
     pub(crate) mod model {
+        #[allow(unused_imports)]
         pub(crate) use loom::model::Builder;
     }
 
@@ -118,15 +120,14 @@ mod inner {
             // if this iteration succeeded, clear the buffer for the
             // next iteration...
             TRACE_BUF.with(|buf| buf.borrow_mut().clear());
+            if iteration % 100 == 0 {
+                println!("{} iteration {} passed", test_name, iteration);
+            }
         });
     }
 
     #[track_caller]
     pub(crate) fn model(model: impl Fn() + std::panic::UnwindSafe + Sync + Send + 'static) {
-        // let mut builder = loom::model::Builder::default();
-        // // // A couple of our tests will hit the max number of branches riiiiight
-        // // // before they should complete. Double it so this stops happening.
-        // builder.max_branches *= 2;
         run_builder(Default::default(), model)
     }
 
