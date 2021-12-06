@@ -5,6 +5,15 @@ use crate::{
 };
 
 #[test]
+// This test currently fails because `loom` implements the wrong semantics for
+// `Thread::unpark()`/`thread::park` (see
+// https://github.com/tokio-rs/loom/issues/246).
+// However, it implements the correct semantics for async `Waker`s (which
+// _should_ be the same as park/unpark), so the async version of this test more
+// or less verifies that the algorithm here is correct.
+//
+// TODO(eliza): when tokio-rs/loom#246 is fixed, we can re-enable this test!
+#[ignore]
 fn basically_works() {
     loom::model(|| {
         let (tx, rx) = sync::channel(ThingBuf::new(4));
