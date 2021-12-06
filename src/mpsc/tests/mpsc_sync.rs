@@ -191,8 +191,37 @@ fn do_producer(tx: sync::Sender<usize>, tag: usize) -> thread::JoinHandle<()> {
 }
 
 #[test]
-fn spsc_send_recv_in_order() {
+fn spsc_send_recv_in_order_no_wrap() {
     const N_SENDS: usize = 4;
+    loom::model(|| {
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS));
+        let consumer = thread::spawn(move || {
+            for i in 1..=N_SENDS {
+                assert_eq!(rx.recv(), Some(i));
+            }
+            assert_eq!(rx.recv(), None);
+        });
+
+        for i in 1..=N_SENDS {
+            tx.send(i).unwrap()
+        }
+        drop(tx);
+        consumer.join().unwrap();
+    })
+}
+
+#[test]
+// This test currently fails because `loom` implements the wrong semantics for
+// `Thread::unpark()`/`thread::park` (see
+// https://github.com/tokio-rs/loom/issues/246).
+// However, it implements the correct semantics for async `Waker`s (which
+// _should_ be the same as park/unpark), so the async version of this test more
+// or less verifies that the algorithm here is correct.
+//
+// TODO(eliza): when tokio-rs/loom#246 is fixed, we can re-enable this test!
+#[ignore]
+fn spsc_send_recv_in_order_wrap() {
+    const N_SENDS: usize = 2;
     loom::model(|| {
         let (tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS / 2));
         let consumer = thread::spawn(move || {

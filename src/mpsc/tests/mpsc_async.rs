@@ -123,10 +123,32 @@ fn spsc_recv_then_send_then_close() {
 }
 
 #[test]
-fn spsc_send_recv_in_order() {
+fn spsc_send_recv_in_order_no_wrap() {
     const N_SENDS: usize = 4;
     loom::model(|| {
         let (tx, rx) = channel(ThingBuf::<usize>::new(N_SENDS));
+        let consumer = thread::spawn(move || {
+            future::block_on(async move {
+                for i in 1..=N_SENDS {
+                    assert_eq!(rx.recv().await, Some(i));
+                }
+                assert_eq!(rx.recv().await, None);
+            })
+        });
+        future::block_on(async move {
+            for i in 1..=N_SENDS {
+                tx.send(i).await.unwrap()
+            }
+        });
+        consumer.join().unwrap();
+    })
+}
+
+#[test]
+fn spsc_send_recv_in_order_wrap() {
+    const N_SENDS: usize = 2;
+    loom::model(|| {
+        let (tx, rx) = channel(ThingBuf::<usize>::new(N_SENDS / 2));
         let consumer = thread::spawn(move || {
             future::block_on(async move {
                 for i in 1..=N_SENDS {
