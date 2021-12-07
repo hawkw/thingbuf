@@ -13,6 +13,10 @@
 
   **A:** Extremely.
 
+- **Q: Is it wait-free?**
+
+  **A:** As long as you don't use the APIs that wait :)
+
 - **Q: Why is there only a bounded variant?**
 
   **A:** Because unbounded queues are of the Devil.
@@ -31,7 +35,3 @@
 - **Q: Why don't the `Ref` types implement `Deref` and `DerefMut`?**
 
   **A:** [Blame `loom` for this.](https://github.com/tokio-rs/loom/pull/219)
-  
- - **Q: Why do the channels only have `try_send`? Where's `send`?**
- 
-   **A:** I haven't written `send` yet. :)
