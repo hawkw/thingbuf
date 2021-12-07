@@ -7,6 +7,7 @@ pub(crate) use self::wait_cell::WaitCell;
 feature! {
     #![feature = "alloc"]
     pub(crate) mod wait_queue;
+    pub(crate) mod wait_queue2;
     pub(crate) use self::wait_queue::WaitQueue;
 }
 

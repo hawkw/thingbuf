@@ -22,7 +22,7 @@ use core::fmt;
 use core::task::Poll;
 
 #[cfg(feature = "alloc")]
-use crate::util::wait::{NotifyOnDrop, WaitQueue};
+use crate::util::wait::wait_queue2::WaitQueue;
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -40,7 +40,7 @@ struct Inner<T, N: Notify> {
     rx_wait: WaitCell<N>,
     tx_count: AtomicUsize,
     #[cfg(feature = "alloc")]
-    tx_wait: WaitQueue<NotifyOnDrop<N>>,
+    tx_wait: WaitQueue<N>,
 }
 
 struct SendRefInner<'a, T, N: Notify> {
@@ -64,7 +64,7 @@ struct SendRefInner<'a, T, N: Notify> {
 }
 
 struct NotifyRx<'a, N: Notify>(&'a WaitCell<N>);
-struct NotifyTx<'a, N: Notify>(&'a WaitQueue<NotifyOnDrop<N>>);
+struct NotifyTx<'a, N: Notify>(&'a WaitQueue<N>);
 
 // ==== impl TrySendError ===
 
@@ -93,7 +93,7 @@ impl<T, N: Notify> Inner<T, N> {
         if self.thingbuf.core.close() {
             crate::loom::hint::spin_loop();
             test_println!("draining_queue");
-            self.tx_wait.drain();
+            self.tx_wait.close();
         }
     }
 }
@@ -144,7 +144,7 @@ impl<T: Default, N: Notify> Inner<T, N> {
             let pushed_waiter = self.tx_wait.push_waiter(|| {
                 let current = mk_waiter();
                 test_println!("parking sender ({:?})", current);
-                NotifyOnDrop::new(current)
+                current
             });
 
             match test_dbg!(pushed_waiter) {
