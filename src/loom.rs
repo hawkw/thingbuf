@@ -115,6 +115,9 @@ mod inner {
             Some(name) => name.to_string(),
         };
         builder.check(move || {
+            // if this iteration succeeded, clear the buffer for the
+            // next iteration...
+            TRACE_BUF.with(|buf| buf.borrow_mut().clear());
             let iteration = current_iteration.fetch_add(1, Ordering::Relaxed);
             traceln(format_args!(
                 "\n---- {} iteration {} ----",
@@ -122,9 +125,6 @@ mod inner {
             ));
 
             model();
-            // if this iteration succeeded, clear the buffer for the
-            // next iteration...
-            TRACE_BUF.with(|buf| buf.borrow_mut().clear());
         });
 
         // Only print iterations on test completion in nocapture mode; otherwise
