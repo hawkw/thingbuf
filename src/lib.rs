@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-use core::{cmp, fmt, mem::MaybeUninit, ops::Index};
+use core::{cmp, fmt, mem::MaybeUninit, ops};
 
 #[macro_use]
 mod macros;
@@ -27,12 +27,13 @@ pub use self::static_thingbuf::StaticThingBuf;
 use crate::{
     loom::{
         atomic::{AtomicUsize, Ordering::*},
-        UnsafeCell,
+        cell::{MutPtr, UnsafeCell},
     },
     util::{Backoff, CachePadded},
 };
 
 pub struct Ref<'slot, T> {
+    ptr: MutPtr<MaybeUninit<T>>,
     slot: &'slot Slot<T>,
     new_state: usize,
 }
@@ -127,7 +128,7 @@ impl Core {
     ) -> Result<Ref<'slots, T>, mpsc::TrySendError<()>>
     where
         T: Default,
-        S: Index<usize, Output = Slot<T>> + ?Sized,
+        S: ops::Index<usize, Output = Slot<T>> + ?Sized,
     {
         test_println!("push_ref");
         let mut backoff = Backoff::new();
@@ -158,16 +159,20 @@ impl Core {
                     Ok(_) => {
                         // We got the slot! It's now okay to write to it
                         test_println!("claimed tail slot [{}]", idx);
+                        // Claim exclusive ownership over the slot
+                        let ptr = slot.value.get_mut();
+
                         if gen == 0 {
-                            slot.value.with_mut(|value| unsafe {
+                            unsafe {
                                 // Safety: we have just claimed exclusive ownership over
                                 // this slot.
-                                (*value).write(T::default());
-                            });
+                                ptr.deref().write(T::default());
+                            };
                             test_println!("-> initialized");
                         }
 
                         return Ok(Ref {
+                            ptr,
                             new_state: tail + 1,
                             slot,
                         });
@@ -207,7 +212,7 @@ impl Core {
 
     fn pop_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, mpsc::TrySendError>
     where
-        S: Index<usize, Output = Slot<T>> + ?Sized,
+        S: ops::Index<usize, Output = Slot<T>> + ?Sized,
     {
         test_println!("pop_ref");
         let mut backoff = Backoff::new();
@@ -234,6 +239,7 @@ impl Core {
                         test_println!("claimed head slot [{}]", idx);
                         return Ok(Ref {
                             new_state: head.wrapping_add(self.gen),
+                            ptr: slot.value.get_mut(),
                             slot,
                         });
                     }
@@ -299,11 +305,9 @@ impl Core {
 // === impl Ref ===
 
 impl<T> Ref<'_, T> {
-    const RELEASED: usize = usize::MAX;
-
     #[inline]
     pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
-        self.slot.value.with(|value| unsafe {
+        self.ptr.with(|value| unsafe {
             // Safety: if a `Ref` exists, we have exclusive ownership of the
             // slot. A `Ref` is only created if the slot has already been
             // initialized.
@@ -315,7 +319,7 @@ impl<T> Ref<'_, T> {
 
     #[inline]
     pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
-        self.slot.value.with_mut(|value| unsafe {
+        self.ptr.with(|value| unsafe {
             // Safety: if a `Ref` exists, we have exclusive ownership of the
             // slot.
             // TODO(eliza): use `MaybeUninit::assume_init_mut` here once it's
@@ -323,23 +327,39 @@ impl<T> Ref<'_, T> {
             f(&mut *(&mut *value).as_mut_ptr())
         })
     }
+}
 
-    pub(crate) fn release(&mut self) {
-        if self.new_state == Self::RELEASED {
-            test_println!("release_ref; already released");
-            return;
+impl<T> ops::Deref for Ref<'_, T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            // Safety: if a `Ref` exists, we have exclusive ownership of the
+            // slot. A `Ref` is only created if the slot has already been
+            // initialized.
+            &*self.ptr.deref().as_ptr()
         }
+    }
+}
 
-        test_println!("release_ref");
-        test_dbg!(self.slot.state.store(test_dbg!(self.new_state), Release));
-        self.new_state = Self::RELEASED;
+impl<T> ops::DerefMut for Ref<'_, T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe {
+            // Safety: if a `Ref` exists, we have exclusive ownership of the
+            // slot. A `Ref` is only created if the slot has already been
+            // initialized.
+            &mut *self.ptr.deref().as_mut_ptr()
+        }
     }
 }
 
 impl<T> Drop for Ref<'_, T> {
     #[inline]
     fn drop(&mut self) {
-        self.release();
+        test_println!("drop Ref<{}>", core::any::type_name::<T>());
+        test_dbg!(self.slot.state.store(test_dbg!(self.new_state), Release));
     }
 }
 

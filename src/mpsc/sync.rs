@@ -107,8 +107,8 @@ impl<T: Default> Receiver<T> {
             match self.inner.poll_recv_ref(thread::current) {
                 Poll::Ready(r) => {
                     return r.map(|slot| RecvRef {
+                        _notify: super::NotifyTx(&self.inner.tx_wait),
                         slot,
-                        inner: &*self.inner,
                     })
                 }
                 Poll::Pending => {

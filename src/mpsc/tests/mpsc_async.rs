@@ -12,18 +12,18 @@ fn mpsc_try_send_recv() {
         let p1 = {
             let tx = tx.clone();
             thread::spawn(move || {
-                tx.try_send_ref().unwrap().with_mut(|val| *val = 1);
+                *tx.try_send_ref().unwrap() = 1;
             })
         };
         let p2 = thread::spawn(move || {
-            tx.try_send(2).unwrap();
-            tx.try_send(3).unwrap();
+            *tx.try_send_ref().unwrap() = 2;
+            *tx.try_send_ref().unwrap() = 3;
         });
 
         let mut vals = future::block_on(async move {
             let mut vals = Vec::new();
             while let Some(val) = rx.recv_ref().await {
-                val.with(|val| vals.push(*val));
+                vals.push(*val);
             }
             vals
         });
@@ -46,8 +46,11 @@ fn rx_closes() {
             'iters: for i in 0..=ITERATIONS {
                 test_println!("sending {}...", i);
                 'send: loop {
-                    match tx.try_send(i) {
-                        Ok(_) => break 'send,
+                    match tx.try_send_ref() {
+                        Ok(mut slot) => {
+                            *slot = i;
+                            break 'send;
+                        }
                         Err(TrySendError::Full(_)) => thread::yield_now(),
                         Err(TrySendError::Closed(_)) => break 'iters,
                     }

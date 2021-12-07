@@ -24,7 +24,7 @@ tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros", "sy
 futures-util = { version = "0.3", default-features = false }
 
 [target.'cfg(loom)'.dev-dependencies]
-loom = { version = "0.5.3", features = ["checkpoint", "futures"] }
+loom = { version = "0.5.4", features = ["checkpoint", "futures"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 
