@@ -280,7 +280,7 @@ mod tests {
     const NUM_NOTIFY: usize = 2;
 
     async fn wait_on(chan: Arc<Chan>) {
-        futures::future::poll_fn(move |cx| {
+        futures_util::future::poll_fn(move |cx| {
             let res = test_dbg!(chan.task.wait_with(|| cx.waker().clone()));
 
             if NUM_NOTIFY == chan.num.load(Relaxed) {

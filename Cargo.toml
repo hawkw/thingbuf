@@ -1,3 +1,9 @@
+[workspace]
+members = [
+    ".",
+    "bench"
+]
+
 [package]
 name = "thingbuf"
 version = "0.1.0"
@@ -15,20 +21,12 @@ default = ["std"]
 [dev-dependencies]
 tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros"] }
 # So that we can use `poll_fn` in tests.
-futures = "0.3"
+futures-util = { version = "0.3", default-features = false }
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { version = "0.5.3", features = ["checkpoint", "futures"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
-
-[target.'cfg(bench)'.dev-dependencies]
-criterion = { version = "0.3.5", features = ["async_tokio"] }
-
-# for comparison benchmarks
-tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
-crossbeam = "0.8.1"
-async-std = "1"
 
 # Custom profile for Loom tests: enable release optimizations so that the loom
 # tests are less slow, but don't disable debug assertions.
@@ -36,14 +34,6 @@ async-std = "1"
 inherits = "test"
 lto = true
 opt-level = 3
-
-[[bench]]
-name = "sync_mpsc"
-harness = false
-
-[[bench]]
-name = "async_mpsc"
-harness = false
 
 [patch.crates-io]
 loom = { git = "https://github.com/tokio-rs/loom", branch = "eliza/fix-double-panic-in-drop" }
