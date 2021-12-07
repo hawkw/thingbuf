@@ -7,4 +7,7 @@ LOOM_LOG="${LOOM_LOG:-info}" \
 LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" \
 cargo test \
     --profile loom \
+    # All loom tests are lib tests; don't run integration or doctests
+    # (they can be run with the normal `cargo test` command).
+    --lib \
     "$@"

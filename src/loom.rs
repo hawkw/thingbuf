@@ -39,12 +39,12 @@ mod inner {
         use std::{
             env, io,
             sync::{
-                atomic::{AtomicUsize, Ordering},
+                atomic::{AtomicBool, AtomicUsize, Ordering},
                 Once,
             },
         };
         use tracing_subscriber::{filter::Targets, fmt, prelude::*};
-
+        static IS_NOCAPTURE: AtomicBool = AtomicBool::new(false);
         static SETUP_TRACE: Once = Once::new();
 
         SETUP_TRACE.call_once(|| {
@@ -82,6 +82,10 @@ mod inner {
                 .finish()
                 .with(filter)
                 .init();
+
+            if std::env::args().any(|arg| arg == "--nocapture") {
+                IS_NOCAPTURE.store(true, Ordering::Relaxed);
+            }
 
             let default_hook = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic| {
@@ -122,7 +126,12 @@ mod inner {
             // next iteration...
             TRACE_BUF.with(|buf| buf.borrow_mut().clear());
         });
-        print!("({} iterations) ", iteration.load(Ordering::Relaxed));
+
+        // Only print iterations on test completion in nocapture mode; otherwise
+        // they'll just get all mangled.
+        if IS_NOCAPTURE.load(Ordering::Relaxed) {
+            print!("({} iterations) ", iteration.load(Ordering::Relaxed));
+        }
     }
 
     #[track_caller]
