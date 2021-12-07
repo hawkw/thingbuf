@@ -6,6 +6,7 @@ use core::{fmt, ptr};
 #[cfg(all(loom, test))]
 mod tests;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct ThingBuf<T> {
     pub(crate) core: Core,
     pub(crate) slots: Box<[Slot<T>]>,
