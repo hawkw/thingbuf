@@ -1,9 +1,13 @@
 on:
   push:
     branches:
-    - main
+      - main
+    paths:
+      - '**.rs'
   workflow_dispatch:
   pull_request:
+    paths:
+      - '**.rs'
 
 name: Lints
 jobs:
