@@ -115,6 +115,7 @@ mod inner {
             Some("main") | None => "test".to_string(),
             Some(name) => name.to_string(),
         };
+        tracing::trace!("{:#?}", builder);
         builder.check(move || {
             // if this iteration succeeded, clear the buffer for the
             // next iteration...
