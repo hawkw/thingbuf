@@ -256,3 +256,27 @@ fn tx_close_wakes() {
         consumer.join().unwrap();
     });
 }
+
+#[test]
+fn tx_close_drains_queue() {
+    const LEN: usize = 4;
+    loom::model(|| {
+        let (tx, rx) = channel(ThingBuf::new(LEN));
+        let producer = thread::spawn(move || {
+            future::block_on(async move {
+                for i in 0..LEN {
+                    tx.send(i).await.unwrap();
+                }
+            })
+        });
+
+        future::block_on(async move {
+            for i in 0..LEN {
+                assert_eq!(rx.recv().await, Some(i))
+            }
+        });
+
+
+        producer.join().unwrap();
+    });
+}

@@ -49,3 +49,24 @@ fn basically_works() {
         }
     }
 }
+
+#[test]
+fn tx_close_drains_queue() {
+    const LEN: usize = 4;
+    for i in 0..10000 {
+        println!("\n\n--- iteration {} ---\n\n", i);
+
+        let (tx, rx) = sync::channel(ThingBuf::new(LEN));
+        let producer = thread::spawn(move || {
+            for i in 0..LEN {
+                tx.send(i).unwrap();
+            }
+        });
+
+        for i in 0..LEN {
+            assert_eq!(rx.recv(), Some(i))
+        }
+
+        producer.join().unwrap();
+    }
+}

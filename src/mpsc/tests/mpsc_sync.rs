@@ -258,3 +258,22 @@ fn tx_close_wakes() {
         consumer.join().unwrap();
     });
 }
+
+#[test]
+fn tx_close_drains_queue() {
+    const LEN: usize = 4;
+    loom::model(|| {
+        let (tx, rx) = sync::channel(ThingBuf::new(LEN));
+        let producer = thread::spawn(move || {
+            for i in 0..LEN {
+                tx.send(i).unwrap();
+            }
+        });
+
+        for i in 0..LEN {
+            assert_eq!(rx.recv(), Some(i))
+        }
+
+        producer.join().unwrap();
+    });
+}
