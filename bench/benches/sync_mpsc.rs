@@ -13,8 +13,8 @@ use std::thread;
 fn bench_spsc_reusable(c: &mut Criterion) {
     let mut group = c.benchmark_group("sync/spsc_reusable");
     static THE_STRING: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
-    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
-    aaaaaaaaaaaaaa";
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+aaaaaaaaaaaaaa";
 
     for size in [100, 500, 1_000, 5_000, 10_000] {
         group.throughput(Throughput::Elements(size));
