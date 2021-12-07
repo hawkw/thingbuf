@@ -151,8 +151,8 @@ impl<T: Default> Receiver<T> {
     pub fn poll_recv_ref(&self, cx: &mut Context<'_>) -> Poll<Option<RecvRef<'_, T>>> {
         self.inner.poll_recv_ref(|| cx.waker().clone()).map(|some| {
             some.map(|slot| RecvRef {
+                _notify: super::NotifyTx(&self.inner.tx_wait),
                 slot,
-                inner: &*self.inner,
             })
         })
     }

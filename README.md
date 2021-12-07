@@ -31,7 +31,3 @@
   "ringbuf"), I called it "stringbuf". Then, I realized you could do this with
   more than just strings. In fact, it can be generalized to arbitrary...things.
   So, "thingbuf".
-
-- **Q: Why don't the `Ref` types implement `Deref` and `DerefMut`?**
-
-  **A:** [Blame `loom` for this.](https://github.com/tokio-rs/loom/pull/219)

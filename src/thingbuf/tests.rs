@@ -14,8 +14,8 @@ fn push_many_mpsc() {
         let q = q.clone();
         move || {
             for &val in vals {
-                if let Ok(mut r) = test_dbg!(q.push_ref()) {
-                    r.with_mut(|r| r.get_mut().push_str(val));
+                if let Ok(mut slot) = test_dbg!(q.push_ref()) {
+                    slot.get_mut().push_str(val);
                 } else {
                     return;
                 }
@@ -32,8 +32,8 @@ fn push_many_mpsc() {
         let mut all_vals = Vec::new();
 
         while Arc::strong_count(&q) > 1 {
-            if let Some(r) = q.pop_ref() {
-                r.with(|val| all_vals.push(val.get_ref().to_string()));
+            if let Some(val) = q.pop_ref() {
+                all_vals.push(val.get_ref().to_string());
             }
             thread::yield_now();
         }
@@ -41,8 +41,8 @@ fn push_many_mpsc() {
         t1.join().unwrap();
         t2.join().unwrap();
 
-        while let Some(r) = test_dbg!(q.pop_ref()) {
-            r.with(|val| all_vals.push(val.get_ref().to_string()));
+        while let Some(val) = test_dbg!(q.pop_ref()) {
+            all_vals.push(val.get_ref().to_string());
         }
 
         test_dbg!(&all_vals);
@@ -65,8 +65,8 @@ fn spsc() {
             thread::spawn(move || {
                 for i in 0..COUNT {
                     loop {
-                        if let Ok(mut guard) = q.push_ref() {
-                            guard.with_mut(|val| *val = i);
+                        if let Ok(mut val) = q.push_ref() {
+                            *val = i;
                             break;
                         }
                         thread::yield_now();
@@ -77,8 +77,8 @@ fn spsc() {
 
         for i in 0..COUNT {
             loop {
-                if let Some(guard) = q.pop_ref() {
-                    guard.with(|val| assert_eq!(*val, i));
+                if let Some(val) = q.pop_ref() {
+                    assert_eq!(*val, i);
                     break;
                 }
                 thread::yield_now();
@@ -99,12 +99,14 @@ fn linearizable() {
         move || {
             while q
                 .push_ref()
-                .map(|mut r| r.with_mut(|val| *val = i))
+                .map(|mut val| {
+                    *val = i;
+                })
                 .is_err()
             {}
 
-            if let Some(mut r) = q.pop_ref() {
-                r.with_mut(|val| *val = 0);
+            if let Some(mut val) = q.pop_ref() {
+                *val = 0;
             }
         }
     }

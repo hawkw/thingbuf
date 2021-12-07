@@ -5,7 +5,7 @@ use crate::{
             AtomicUsize,
             Ordering::{self, *},
         },
-        UnsafeCell,
+        cell::UnsafeCell,
     },
     util::{panic, Backoff, CachePadded},
 };
