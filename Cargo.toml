@@ -19,7 +19,7 @@ default = ["std"]
 [dependencies]
 
 [dev-dependencies]
-tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 # So that we can use `poll_fn` in tests.
 futures-util = { version = "0.3", default-features = false }
 
