@@ -53,10 +53,18 @@ impl<T: Default> Sender<T> {
         self.inner.try_send(val)
     }
 
-    pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
+    pub fn send_ref(&mut self) -> Result<SendRef<'_, T>, Closed> {
+        let mut waiter = Waiter::new();
         loop {
             // perform one send ref loop iteration
-            if let Poll::Ready(result) = self.inner.poll_send_ref(thread::current) {
+
+            let waiter = unsafe {
+                // Safety: in this case, it's totally safe to pin the waiter, as
+                // it is owned uniquely by this function, and it cannot possibly
+                // be moved while this thread is parked.
+                Pin::new_unchecked(&mut waiter)
+            };
+            if let Poll::Ready(result) = self.inner.poll_send_ref(Some(waiter), thread::current) {
                 return result.map(SendRef);
             }
 
@@ -65,7 +73,7 @@ impl<T: Default> Sender<T> {
         }
     }
 
-    pub fn send(&self, val: T) -> Result<(), Closed<T>> {
+    pub fn send(&mut self, val: T) -> Result<(), Closed<T>> {
         match self.send_ref() {
             Err(Closed(())) => Err(Closed(val)),
             Ok(mut slot) => {

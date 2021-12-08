@@ -17,6 +17,7 @@ alloc = []
 default = ["std"]
 
 [dependencies]
+pin-project = "1"
 
 [dev-dependencies]
 tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }

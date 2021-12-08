@@ -4,6 +4,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
+pub(crate) mod mutex;
 pub(crate) mod panic;
 pub(crate) mod wait;
 

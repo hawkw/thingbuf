@@ -9,7 +9,7 @@ feature! {
     pub(crate) mod wait_queue;
     pub(crate) use self::wait_queue::WaitQueue;
 }
-
+pub(crate) mod wait_queue2;
 #[cfg(feature = "std")]
 use crate::loom::thread;
 

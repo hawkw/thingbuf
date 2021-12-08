@@ -4,6 +4,7 @@ use crate::{
         atomic::{self, Ordering},
         sync::Arc,
     },
+    util::wait::wait_queue2::Waiter,
     Ref, ThingBuf,
 };
 use core::{
@@ -74,21 +75,55 @@ impl<T: Default> Sender<T> {
 
     pub async fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
         // This future is private because if we replace the waiter queue thing with an
-        // intrusive list, we won't want to expose the future type publicly, for safety reasons.
-        struct SendRefFuture<'sender, T>(&'sender Sender<T>);
+        // intrusive list, we won't want to expose the future type publicly, for
+        // safety reasons.
+        #[pin_project::pin_project(PinnedDrop)]
+        struct SendRefFuture<'sender, T> {
+            tx: &'sender Sender<T>,
+            queued: bool,
+            #[pin]
+            waiter: Waiter<Waker>,
+        }
+
         impl<'sender, T: Default + 'sender> Future for SendRefFuture<'sender, T> {
             type Output = Result<SendRef<'sender, T>, Closed>;
 
-            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 // perform one send ref loop iteration
-                self.0
+
+                let this = self.as_mut().project();
+                let queued = this.queued;
+                let waiter = if test_dbg!(*queued) {
+                    None
+                } else {
+                    Some(this.waiter)
+                };
+                this.tx
                     .inner
-                    .poll_send_ref(|| cx.waker().clone())
+                    .poll_send_ref(waiter, move || {
+                        *queued = true;
+                        cx.waker().clone()
+                    })
                     .map(|ok| ok.map(SendRef))
             }
         }
 
-        SendRefFuture(self).await
+        #[pin_project::pinned_drop]
+        impl<T> PinnedDrop for SendRefFuture<'_, T> {
+            fn drop(self: Pin<&mut Self>) {
+                if test_dbg!(self.queued) {
+                    let this = self.project();
+                    this.waiter.remove(&this.tx.inner.tx_wait)
+                }
+            }
+        }
+
+        SendRefFuture {
+            tx: self,
+            queued: false,
+            waiter: Waiter::new(),
+        }
+        .await
     }
 
     pub async fn send(&self, val: T) -> Result<(), Closed<T>> {
