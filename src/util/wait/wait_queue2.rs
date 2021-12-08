@@ -149,6 +149,10 @@ impl<T: Notify> WaitQueue<T> {
         })
     }
 }
+
+unsafe impl<T: Notify + Send> Send for WaitQueue<T> {}
+unsafe impl<T: Notify + Send> Sync for WaitQueue<T> {}
+
 // === impl Node ===
 
 impl<T> Node<T> {
