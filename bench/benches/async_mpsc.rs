@@ -17,8 +17,9 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
 aaaaaaaaaaaaaa";
 
     const SIZE: u64 = 100;
+    group.throughput(Throughput::Elements(SIZE));
+
     for senders in [10, 50, 100] {
-        group.throughput(Throughput::Elements(SIZE));
         group.bench_with_input(
             BenchmarkId::new("ThingBuf", senders),
             &senders,
@@ -49,6 +50,7 @@ aaaaaaaaaaaaaa";
             },
         );
 
+        #[cfg(feature = "futures")]
         group.bench_with_input(
             BenchmarkId::new("futures::channel::mpsc", senders),
             &senders,
@@ -75,6 +77,7 @@ aaaaaaaaaaaaaa";
             },
         );
 
+        #[cfg(feature = "tokio-sync")]
         group.bench_with_input(
             BenchmarkId::new("tokio::sync::mpsc", senders),
             &senders,
@@ -120,6 +123,7 @@ aaaaaaaaaaaaaa";
             },
         );
 
+        #[cfg(feature = "async-std")]
         group.bench_with_input(
             BenchmarkId::new("async_std::channel::bounded", senders),
             &senders,
@@ -185,6 +189,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             },
         );
 
+        #[cfg(feature = "futures")]
         group.bench_with_input(
             BenchmarkId::new("futures::channel::mpsc", senders),
             &senders,
@@ -211,6 +216,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             },
         );
 
+        #[cfg(feature = "tokio-sync")]
         group.bench_with_input(
             BenchmarkId::new("tokio::sync::mpsc", senders),
             &senders,
@@ -256,6 +262,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             },
         );
 
+        #[cfg(feature = "async-std")]
         group.bench_with_input(
             BenchmarkId::new("async_std::channel::bounded", senders),
             &senders,

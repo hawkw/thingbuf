@@ -6,22 +6,31 @@ publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
+[features]
+# These feature flags can be disabled if we don't want to run comparison
+# benchmarks, such as when just comparing two `thingbuf` versions.
+comparisons = ["crossbeam", "async-std", "futures", "tokio-sync", "std-sync"]
+tokio-sync = ["tokio/sync"]
+std-sync = []
 
-[dev-dependencies]
+[dependencies]
 thingbuf = { path = ".." }
 criterion = { version = "0.3.5", features = ["async_tokio"] }
 
 # for comparison benchmarks
-tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "sync"] }
-crossbeam = "0.8.1"
-async-std = "1"
-futures = "0.3"
+tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread"] }
+crossbeam = { version = "0.8.1", optional = true }
+async-std = { version = "1", optional = true }
+futures = { version = "0.3", optional = true }
 
 [[bench]]
-name = "sync_mpsc"
+name = "sync_spsc"
 harness = false
 
 [[bench]]
 name = "async_mpsc"
+harness = false
+
+[[bench]]
+name = "async_spsc"
 harness = false
