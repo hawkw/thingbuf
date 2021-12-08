@@ -23,8 +23,7 @@ aaaaaaaaaaaaaa";
             BenchmarkId::new("ThingBuf", senders),
             &senders,
             |b, &senders| {
-                let rt = runtime::Builder::new_multi_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
+                b.to_async(rt()).iter(|| async {
                     use thingbuf::{mpsc, ThingBuf};
                     let (tx, rx) = mpsc::channel(ThingBuf::<String>::new(100));
                     for _ in 0..senders {
@@ -54,8 +53,7 @@ aaaaaaaaaaaaaa";
             BenchmarkId::new("futures::channel::mpsc", senders),
             &senders,
             |b, &senders| {
-                let rt = runtime::Builder::new_current_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
+                b.to_async(rt()).iter(|| async {
                     use futures::{channel::mpsc, sink::SinkExt, stream::StreamExt};
                     let (tx, mut rx) = mpsc::channel(100);
                     for _ in 0..senders {
@@ -81,8 +79,7 @@ aaaaaaaaaaaaaa";
             BenchmarkId::new("tokio::sync::mpsc", senders),
             &senders,
             |b, &senders| {
-                let rt = runtime::Builder::new_multi_thread().build().unwrap();
-                b.to_async(rt).iter(|| {
+                b.to_async(rt()).iter(|| {
                     // turn off Tokio's automatic cooperative yielding for this
                     // benchmark. in code with a large number of concurrent
                     // tasks, this feature makes the MPSC channel (and other
@@ -127,8 +124,7 @@ aaaaaaaaaaaaaa";
             BenchmarkId::new("async_std::channel::bounded", senders),
             &senders,
             |b, &senders| {
-                let rt = runtime::Builder::new_multi_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
+                b.to_async(rt()).iter(|| async {
                     use async_std::channel;
                     let (tx, rx) = channel::bounded(100);
 
@@ -164,8 +160,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             BenchmarkId::new("ThingBuf", senders),
             &senders,
             |b, &senders| {
-                let rt = runtime::Builder::new_multi_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
+                b.to_async(rt()).iter(|| async {
                     use thingbuf::{mpsc, ThingBuf};
                     let (tx, rx) = mpsc::channel(ThingBuf::new(100));
                     for i in 0..senders {
@@ -194,8 +189,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             BenchmarkId::new("futures::channel::mpsc", senders),
             &senders,
             |b, &senders| {
-                let rt = runtime::Builder::new_current_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
+                b.to_async(rt()).iter(|| async {
                     use futures::{channel::mpsc, sink::SinkExt, stream::StreamExt};
                     let (tx, mut rx) = mpsc::channel(100);
                     for i in 0..senders {
@@ -221,8 +215,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             BenchmarkId::new("tokio::sync::mpsc", senders),
             &senders,
             |b, &senders| {
-                let rt = runtime::Builder::new_multi_thread().build().unwrap();
-                b.to_async(rt).iter(|| {
+                b.to_async(rt()).iter(|| {
                     // turn off Tokio's automatic cooperative yielding for this
                     // benchmark. in code with a large number of concurrent
                     // tasks, this feature makes the MPSC channel (and other
@@ -267,8 +260,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             BenchmarkId::new("async_std::channel::bounded", senders),
             &senders,
             |b, &senders| {
-                let rt = runtime::Builder::new_multi_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
+                b.to_async(rt()).iter(|| async {
                     use async_std::channel;
                     let (tx, rx) = channel::bounded(100);
 
@@ -293,6 +285,10 @@ fn bench_mpsc_integer(c: &mut Criterion) {
     }
 
     group.finish();
+}
+
+fn rt() -> tokio::runtime::Runtime {
+    runtime::Builder::new_multi_thread().build().unwrap()
 }
 
 criterion_group!(benches, bench_mpsc_reusable, bench_mpsc_integer,);
