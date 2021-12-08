@@ -10,61 +10,66 @@ use tokio::{runtime, task};
 /// So, this may not be strictly representative of performance in the case of,
 /// say, sending a bunch of integers over the channel; instead it simulates
 /// the kind of scenario that `thingbuf` is optimized for.
-fn bench_spsc_reusable(c: &mut Criterion) {
-    let mut group = c.benchmark_group("async/spsc_reusable");
+fn bench_mpsc_reusable(c: &mut Criterion) {
+    let mut group = c.benchmark_group("async/mpsc_reusable");
     static THE_STRING: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
 aaaaaaaaaaaaaa";
 
-    for size in [100, 500, 1_000, 5_000, 10_000] {
-        group.throughput(Throughput::Elements(size));
-        group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
-            let rt = runtime::Builder::new_current_thread().build().unwrap();
-            b.to_async(rt).iter(|| async {
-                use thingbuf::{
-                    mpsc::{self, TrySendError},
-                    ThingBuf,
-                };
-                let (tx, rx) = mpsc::channel(ThingBuf::new(100));
-                task::spawn(async move {
-                    loop {
-                        match tx.try_send_ref() {
-                            Ok(mut r) => r.with_mut(|s: &mut String| {
-                                s.clear();
-                                s.push_str(THE_STRING)
-                            }),
-                            Err(TrySendError::Closed(_)) => break,
-                            _ => task::yield_now().await,
-                        }
-                    }
-                });
-                for _ in 0..i {
-                    let r = rx.recv_ref().await.unwrap();
-                    r.with(|val| {
-                        criterion::black_box(val);
-                    });
-                }
-            })
-        });
+    const SIZE: u64 = 100;
+    group.throughput(Throughput::Elements(SIZE));
 
+    for senders in [10, 50, 100] {
         group.bench_with_input(
-            BenchmarkId::new("futures::channel::mpsc", size),
-            &size,
-            |b, &i| {
-                let rt = runtime::Builder::new_current_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
-                    use futures::{channel::mpsc, stream::StreamExt};
-                    let (mut tx, mut rx) = mpsc::channel(100);
-                    task::spawn(async move {
-                        loop {
-                            match tx.try_send(String::from(THE_STRING)) {
-                                Ok(()) => {}
-                                Err(e) if e.is_disconnected() => break,
-                                _ => task::yield_now().await,
+            BenchmarkId::new("ThingBuf", senders),
+            &senders,
+            |b, &senders| {
+                b.to_async(rt()).iter(|| async {
+                    use thingbuf::{mpsc, ThingBuf};
+                    let (tx, rx) = mpsc::channel(ThingBuf::<String>::new(100));
+                    for _ in 0..senders {
+                        let tx = tx.clone();
+                        task::spawn(async move {
+                            loop {
+                                match tx.send_ref().await {
+                                    Ok(mut slot) => {
+                                        slot.clear();
+                                        slot.push_str(THE_STRING);
+                                    }
+                                    Err(_) => break,
+                                }
                             }
-                        }
-                    });
-                    for _ in 0..i {
+                        });
+                    }
+
+                    for _ in 0..SIZE {
+                        let val = rx.recv_ref().await.unwrap();
+                        criterion::black_box(&*val);
+                    }
+                })
+            },
+        );
+
+        #[cfg(feature = "futures")]
+        group.bench_with_input(
+            BenchmarkId::new("futures::channel::mpsc", senders),
+            &senders,
+            |b, &senders| {
+                b.to_async(rt()).iter(|| async {
+                    use futures::{channel::mpsc, sink::SinkExt, stream::StreamExt};
+                    let (tx, mut rx) = mpsc::channel(100);
+                    for _ in 0..senders {
+                        let mut tx = tx.clone();
+                        task::spawn(async move {
+                            loop {
+                                match tx.send(String::from(THE_STRING)).await {
+                                    Ok(_) => {}
+                                    Err(_) => break,
+                                }
+                            }
+                        });
+                    }
+                    for _ in 0..SIZE {
                         let val = rx.next().await.unwrap();
                         criterion::black_box(&val);
                     }
@@ -72,12 +77,12 @@ aaaaaaaaaaaaaa";
             },
         );
 
+        #[cfg(feature = "tokio-sync")]
         group.bench_with_input(
-            BenchmarkId::new("tokio::sync::mpsc", size),
-            &size,
-            |b, &i| {
-                let rt = runtime::Builder::new_current_thread().build().unwrap();
-                b.to_async(rt).iter(|| {
+            BenchmarkId::new("tokio::sync::mpsc", senders),
+            &senders,
+            |b, &senders| {
+                b.to_async(rt()).iter(|| {
                     // turn off Tokio's automatic cooperative yielding for this
                     // benchmark. in code with a large number of concurrent
                     // tasks, this feature makes the MPSC channel (and other
@@ -90,23 +95,26 @@ aaaaaaaaaaaaaa";
                     // time ping-ponging through the scheduler than every other
                     // implementation.
                     tokio::task::unconstrained(async {
-                        use tokio::sync::mpsc::{self, error::TrySendError};
+                        use tokio::sync::mpsc;
                         let (tx, mut rx) = mpsc::channel(100);
-                        task::spawn(tokio::task::unconstrained(async move {
-                            loop {
-                                // this actually brings Tokio's MPSC closer to what
-                                // `ThingBuf` can do than all the other impls --- we
-                                // only allocate if we _were_ able to reserve send
-                                // capacity. but, we will still allocate and
-                                // deallocate a string for every message...
-                                match tx.try_reserve() {
-                                    Ok(permit) => permit.send(String::from(THE_STRING)),
-                                    Err(TrySendError::Closed(_)) => break,
-                                    _ => task::yield_now().await,
+
+                        for _ in 0..senders {
+                            let tx = tx.clone();
+                            task::spawn(tokio::task::unconstrained(async move {
+                                loop {
+                                    // this actually brings Tokio's MPSC closer to what
+                                    // `ThingBuf` can do than all the other impls --- we
+                                    // only allocate if we _were_ able to reserve send
+                                    // capacity. but, we will still allocate and
+                                    // deallocate a string for every message...
+                                    match tx.reserve().await {
+                                        Ok(permit) => permit.send(String::from(THE_STRING)),
+                                        Err(_) => break,
+                                    }
                                 }
-                            }
-                        }));
-                        for _ in 0..i {
+                            }));
+                        }
+                        for _ in 0..SIZE {
                             let val = rx.recv().await.unwrap();
                             criterion::black_box(&val);
                         }
@@ -115,24 +123,27 @@ aaaaaaaaaaaaaa";
             },
         );
 
+        #[cfg(feature = "async-std")]
         group.bench_with_input(
-            BenchmarkId::new("async_std::channel::bounded", size),
-            &size,
-            |b, &i| {
-                let rt = runtime::Builder::new_current_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
-                    use async_std::channel::{self, TrySendError};
+            BenchmarkId::new("async_std::channel::bounded", senders),
+            &senders,
+            |b, &senders| {
+                b.to_async(rt()).iter(|| async {
+                    use async_std::channel;
                     let (tx, rx) = channel::bounded(100);
-                    task::spawn(async move {
-                        loop {
-                            match tx.try_send(String::from(THE_STRING)) {
-                                Ok(()) => {}
-                                Err(TrySendError::Closed(_)) => break,
-                                _ => task::yield_now().await,
+
+                    for _ in 0..senders {
+                        let tx = tx.clone();
+                        task::spawn(async move {
+                            loop {
+                                match tx.send(String::from(THE_STRING)).await {
+                                    Ok(_) => {}
+                                    Err(_) => break,
+                                }
                             }
-                        }
-                    });
-                    for _ in 0..i {
+                        });
+                    }
+                    for _ in 0..SIZE {
                         let val = rx.recv().await.unwrap();
                         criterion::black_box(&val);
                     }
@@ -144,74 +155,73 @@ aaaaaaaaaaaaaa";
     group.finish();
 }
 
-/// The same benchmark, but with integers. Messages are not heap allocated, so
-/// non-thingbuf channel impls are not burdened by allocator churn for messages.
-fn bench_spsc_integer(c: &mut Criterion) {
-    let mut group = c.benchmark_group("async/spsc_integer");
-
-    for size in [100, 500, 1_000, 5_000, 10_000] {
-        group.throughput(Throughput::Elements(size));
-        group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
-            let rt = runtime::Builder::new_current_thread().build().unwrap();
-            b.to_async(rt).iter(|| async {
-                use thingbuf::{
-                    mpsc::{self, TrySendError},
-                    ThingBuf,
-                };
-                let (tx, rx) = mpsc::channel(ThingBuf::new(100));
-                task::spawn(async move {
-                    let mut i = 0;
-                    loop {
-                        match tx.try_send(i) {
-                            Ok(()) => {
-                                i += 1;
-                            }
-                            Err(TrySendError::Closed(_)) => break,
-                            _ => task::yield_now().await,
-                        }
-                    }
-                });
-                for n in 0..i {
-                    let val = rx.recv().await.unwrap();
-                    assert_eq!(n, val);
-                }
-            })
-        });
-
+fn bench_mpsc_integer(c: &mut Criterion) {
+    let mut group = c.benchmark_group("async/mpsc_integer");
+    const SIZE: u64 = 1_000;
+    for senders in [10, 50, 100] {
+        group.throughput(Throughput::Elements(SIZE));
         group.bench_with_input(
-            BenchmarkId::new("futures::channel::mpsc", size),
-            &size,
-            |b, &i| {
-                let rt = runtime::Builder::new_current_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
-                    use futures::{channel::mpsc, stream::StreamExt};
-                    let (mut tx, mut rx) = mpsc::channel(100);
-                    task::spawn(async move {
-                        let mut i = 0;
-                        loop {
-                            match tx.try_send(i) {
-                                Ok(()) => {
-                                    i += 1;
+            BenchmarkId::new("ThingBuf", senders),
+            &senders,
+            |b, &senders| {
+                b.to_async(rt()).iter(|| async {
+                    use thingbuf::{mpsc, ThingBuf};
+                    let (tx, rx) = mpsc::channel(ThingBuf::new(100));
+                    for i in 0..senders {
+                        let tx = tx.clone();
+                        task::spawn(async move {
+                            loop {
+                                match tx.send_ref().await {
+                                    Ok(mut slot) => {
+                                        *slot = i;
+                                    }
+                                    Err(_) => break,
                                 }
-                                Err(e) if e.is_disconnected() => break,
-                                _ => task::yield_now().await,
                             }
-                        }
-                    });
-                    for n in 0..i {
-                        let val = rx.next().await.unwrap();
-                        assert_eq!(n, val);
+                        });
+                    }
+
+                    for _ in 0..SIZE {
+                        let val = rx.recv_ref().await.unwrap();
+                        criterion::black_box(&*val);
                     }
                 })
             },
         );
 
+        #[cfg(feature = "futures")]
         group.bench_with_input(
-            BenchmarkId::new("tokio::sync::mpsc", size),
-            &size,
-            |b, &i| {
-                let rt = runtime::Builder::new_current_thread().build().unwrap();
-                b.to_async(rt).iter(|| {
+            BenchmarkId::new("futures::channel::mpsc", senders),
+            &senders,
+            |b, &senders| {
+                b.to_async(rt()).iter(|| async {
+                    use futures::{channel::mpsc, sink::SinkExt, stream::StreamExt};
+                    let (tx, mut rx) = mpsc::channel(100);
+                    for i in 0..senders {
+                        let mut tx = tx.clone();
+                        task::spawn(async move {
+                            loop {
+                                match tx.send(i).await {
+                                    Ok(_) => {}
+                                    Err(_) => break,
+                                }
+                            }
+                        });
+                    }
+                    for _ in 0..SIZE {
+                        let val = rx.next().await.unwrap();
+                        criterion::black_box(&val);
+                    }
+                })
+            },
+        );
+
+        #[cfg(feature = "tokio-sync")]
+        group.bench_with_input(
+            BenchmarkId::new("tokio::sync::mpsc", senders),
+            &senders,
+            |b, &senders| {
+                b.to_async(rt()).iter(|| {
                     // turn off Tokio's automatic cooperative yielding for this
                     // benchmark. in code with a large number of concurrent
                     // tasks, this feature makes the MPSC channel (and other
@@ -224,52 +234,57 @@ fn bench_spsc_integer(c: &mut Criterion) {
                     // time ping-ponging through the scheduler than every other
                     // implementation.
                     tokio::task::unconstrained(async {
-                        use tokio::sync::mpsc::{self, error::TrySendError};
+                        use tokio::sync::mpsc;
                         let (tx, mut rx) = mpsc::channel(100);
-                        task::spawn(tokio::task::unconstrained(async move {
-                            let mut i = 0;
-                            loop {
-                                match tx.try_send(i) {
-                                    Ok(()) => {
-                                        i += 1;
+
+                        for i in 0..senders {
+                            let tx = tx.clone();
+                            task::spawn(tokio::task::unconstrained(async move {
+                                loop {
+                                    // this actually brings Tokio's MPSC closer to what
+                                    // `ThingBuf` can do than all the other impls --- we
+                                    // only allocate if we _were_ able to reserve send
+                                    // capacity. but, we will still allocate and
+                                    // deallocate a string for every message...
+                                    match tx.send(i).await {
+                                        Ok(_) => {}
+                                        Err(_) => break,
                                     }
-                                    Err(TrySendError::Closed(_)) => break,
-                                    _ => task::yield_now().await,
                                 }
-                            }
-                        }));
-                        for n in 0..i {
+                            }));
+                        }
+                        for _ in 0..SIZE {
                             let val = rx.recv().await.unwrap();
-                            assert_eq!(n, val);
+                            criterion::black_box(&val);
                         }
                     })
                 })
             },
         );
 
+        #[cfg(feature = "async-std")]
         group.bench_with_input(
-            BenchmarkId::new("async_std::channel::bounded", size),
-            &size,
-            |b, &i| {
-                let rt = runtime::Builder::new_current_thread().build().unwrap();
-                b.to_async(rt).iter(|| async {
-                    use async_std::channel::{self, TrySendError};
+            BenchmarkId::new("async_std::channel::bounded", senders),
+            &senders,
+            |b, &senders| {
+                b.to_async(rt()).iter(|| async {
+                    use async_std::channel;
                     let (tx, rx) = channel::bounded(100);
-                    task::spawn(async move {
-                        let mut i = 0;
-                        loop {
-                            match tx.try_send(i) {
-                                Ok(()) => {
-                                    i += 1;
+
+                    for i in 0..senders {
+                        let tx = tx.clone();
+                        task::spawn(async move {
+                            loop {
+                                match tx.send(i).await {
+                                    Ok(_) => {}
+                                    Err(_) => break,
                                 }
-                                Err(TrySendError::Closed(_)) => break,
-                                _ => task::yield_now().await,
                             }
-                        }
-                    });
-                    for n in 0..i {
+                        });
+                    }
+                    for _ in 0..SIZE {
                         let val = rx.recv().await.unwrap();
-                        assert_eq!(n, val);
+                        criterion::black_box(&val);
                     }
                 })
             },
@@ -279,5 +294,9 @@ fn bench_spsc_integer(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_spsc_reusable, bench_spsc_integer);
+fn rt() -> tokio::runtime::Runtime {
+    runtime::Builder::new_multi_thread().build().unwrap()
+}
+
+criterion_group!(benches, bench_mpsc_reusable, bench_mpsc_integer,);
 criterion_main!(benches);

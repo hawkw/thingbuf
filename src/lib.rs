@@ -392,6 +392,9 @@ impl<T: fmt::Write> fmt::Write for Ref<'_, T> {
     }
 }
 
+unsafe impl<T: Send> Send for Ref<'_, T> {}
+unsafe impl<T: Send> Sync for Ref<'_, T> {}
+
 // === impl Slot ===
 
 const EMPTY_STATE: usize = usize::MAX;
