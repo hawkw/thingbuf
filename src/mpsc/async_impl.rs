@@ -4,7 +4,7 @@ use crate::{
         atomic::{self, Ordering},
         sync::Arc,
     },
-    util::wait::Waiter,
+    wait::Waiter,
     Ref, ThingBuf,
 };
 use core::{

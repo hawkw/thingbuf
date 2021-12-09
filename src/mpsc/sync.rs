@@ -10,7 +10,7 @@ use crate::{
         sync::Arc,
         thread::{self, Thread},
     },
-    util::wait::Waiter,
+    wait::Waiter,
     Ref, ThingBuf,
 };
 use core::fmt;

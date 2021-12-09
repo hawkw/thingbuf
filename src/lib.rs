@@ -7,6 +7,7 @@ mod macros;
 
 mod loom;
 mod util;
+mod wait;
 
 feature! {
     #![feature = "alloc"]

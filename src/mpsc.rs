@@ -12,10 +12,8 @@
 
 use crate::{
     loom::{atomic::AtomicUsize, hint},
-    util::{
-        wait::{Notify, WaitCell, WaitQueue, WaitResult, Waiter},
-        Backoff,
-    },
+    util::Backoff,
+    wait::{Notify, WaitCell, WaitQueue, WaitResult, Waiter},
     Ref, ThingBuf,
 };
 use core::fmt;

@@ -1,4 +1,3 @@
-use super::{Notify, WaitResult};
 use crate::{
     loom::{
         atomic::{
@@ -8,6 +7,7 @@ use crate::{
         cell::UnsafeCell,
     },
     util::panic::{self, RefUnwindSafe, UnwindSafe},
+    wait::{Notify, WaitResult},
 };
 use core::{fmt, ops};
 

@@ -6,7 +6,6 @@ use core::{
 
 pub(crate) mod mutex;
 pub(crate) mod panic;
-pub(crate) mod wait;
 
 #[derive(Debug)]
 pub(crate) struct Backoff(u8);

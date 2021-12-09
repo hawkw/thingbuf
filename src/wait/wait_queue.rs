@@ -3,11 +3,8 @@ use crate::{
         atomic::{AtomicBool, AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
-    util::{
-        mutex::Mutex,
-        wait::{Notify, WaitResult},
-        CachePadded,
-    },
+    util::{mutex::Mutex, CachePadded},
+    wait::{Notify, WaitResult},
 };
 
 use core::{fmt, marker::PhantomPinned, pin::Pin, ptr::NonNull};
