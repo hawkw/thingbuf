@@ -220,11 +220,6 @@ impl<T> List<T> {
         }
     }
 
-    fn is_empty(&self) -> bool {
-        debug_assert_eq!(self.head.is_none(), self.tail.is_none());
-        test_dbg!(self.head.is_none())
-    }
-
     fn push_front(&mut self, waiter: Pin<&mut Waiter<T>>) {
         unsafe {
             waiter.with_node(|node| {

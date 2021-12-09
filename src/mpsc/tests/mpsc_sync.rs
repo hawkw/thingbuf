@@ -47,7 +47,7 @@ fn mpsc_try_send_recv() {
 fn rx_closes() {
     const ITERATIONS: usize = 6;
     loom::model(|| {
-        let (mut tx, rx) = sync::channel(ThingBuf::new(ITERATIONS / 2));
+        let (tx, rx) = sync::channel(ThingBuf::new(ITERATIONS / 2));
 
         let producer = thread::spawn(move || {
             'iters: for i in 0..=ITERATIONS {
@@ -134,7 +134,7 @@ fn spsc_recv_then_try_send_then_close() {
 #[ignore]
 fn mpsc_send_recv_wrap() {
     loom::model(|| {
-        let (mut tx, rx) = sync::channel(ThingBuf::<usize>::new(1));
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(1));
         let producer1 = do_producer(tx.clone(), 10);
         let producer2 = do_producer(tx, 20);
 
@@ -165,7 +165,7 @@ fn mpsc_send_recv_wrap() {
 #[test]
 fn mpsc_send_recv_no_wrap() {
     loom::model(|| {
-        let (mut tx, rx) = sync::channel(ThingBuf::<usize>::new(2));
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(2));
         let producer1 = do_producer(tx.clone(), 10);
         let producer2 = do_producer(tx, 20);
 
