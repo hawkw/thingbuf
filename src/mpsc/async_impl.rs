@@ -4,7 +4,7 @@ use crate::{
         atomic::{self, Ordering},
         sync::Arc,
     },
-    util::wait::wait_queue2::Waiter,
+    util::wait::Waiter,
     Ref, ThingBuf,
 };
 use core::{
@@ -74,13 +74,10 @@ impl<T: Default> Sender<T> {
     }
 
     pub async fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
-        // This future is private because if we replace the waiter queue thing with an
-        // intrusive list, we won't want to expose the future type publicly, for
-        // safety reasons.
         #[pin_project::pin_project(PinnedDrop)]
         struct SendRefFuture<'sender, T> {
             tx: &'sender Sender<T>,
-            queued: bool,
+            has_been_queued: bool,
             #[pin]
             waiter: Waiter<Waker>,
         }
@@ -92,15 +89,10 @@ impl<T: Default> Sender<T> {
                 // perform one send ref loop iteration
 
                 let this = self.as_mut().project();
-                let queued = this.queued;
-                let waiter = if test_dbg!(*queued) {
-                    None
-                } else {
-                    Some(this.waiter)
-                };
+                let queued = this.has_been_queued;
                 this.tx
                     .inner
-                    .poll_send_ref(waiter, move || {
+                    .poll_send_ref(Some(this.waiter), move || {
                         *queued = true;
                         cx.waker().clone()
                     })
@@ -111,7 +103,7 @@ impl<T: Default> Sender<T> {
         #[pin_project::pinned_drop]
         impl<T> PinnedDrop for SendRefFuture<'_, T> {
             fn drop(self: Pin<&mut Self>) {
-                if test_dbg!(self.queued) {
+                if test_dbg!(self.has_been_queued) {
                     let this = self.project();
                     this.waiter.remove(&this.tx.inner.tx_wait)
                 }
@@ -120,7 +112,7 @@ impl<T: Default> Sender<T> {
 
         SendRefFuture {
             tx: self,
-            queued: false,
+            has_been_queued: false,
             waiter: Waiter::new(),
         }
         .await
@@ -238,5 +230,46 @@ impl<'a, T: Default> Future for RecvFuture<'a, T> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.rx.poll_recv(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ThingBuf;
+
+    fn _assert_sync<T: Sync>(_: T) {}
+    fn _assert_send<T: Send>(_: T) {}
+
+    #[test]
+    fn recv_ref_future_is_send() {
+        fn _compiles() {
+            let (_, rx) = channel::<usize>(ThingBuf::new(10));
+            _assert_send(rx.recv_ref());
+        }
+    }
+
+    #[test]
+    fn recv_ref_future_is_sync() {
+        fn _compiles() {
+            let (_, rx) = channel::<usize>(ThingBuf::new(10));
+            _assert_sync(rx.recv_ref());
+        }
+    }
+
+    #[test]
+    fn send_ref_future_is_send() {
+        fn _compiles() {
+            let (tx, _) = channel::<usize>(ThingBuf::new(10));
+            _assert_send(tx.send_ref());
+        }
+    }
+
+    #[test]
+    fn send_ref_future_is_sync() {
+        fn _compiles() {
+            let (tx, _) = channel::<usize>(ThingBuf::new(10));
+            _assert_sync(tx.send_ref());
+        }
     }
 }

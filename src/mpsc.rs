@@ -13,7 +13,7 @@
 use crate::{
     loom::{atomic::AtomicUsize, hint},
     util::{
-        wait::{Notify, WaitCell, WaitResult},
+        wait::{Notify, WaitCell, WaitQueue, WaitResult, Waiter},
         Backoff,
     },
     Ref, ThingBuf,
@@ -21,8 +21,6 @@ use crate::{
 use core::fmt;
 use core::pin::Pin;
 use core::task::Poll;
-
-use crate::util::wait::wait_queue2::{WaitQueue, Waiter};
 
 #[derive(Debug)]
 #[non_exhaustive]

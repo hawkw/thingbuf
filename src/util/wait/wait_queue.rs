@@ -1,248 +1,313 @@
-use super::{Notify, WaitResult};
 use crate::{
     loom::{
-        atomic::{
-            AtomicUsize,
-            Ordering::{self, *},
-        },
+        atomic::{AtomicBool, AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
-    util::{panic, Backoff, CachePadded},
+    util::{
+        mutex::Mutex,
+        wait::{Notify, WaitResult},
+        CachePadded,
+    },
 };
-use alloc::collections::VecDeque;
-use core::fmt;
 
-/// A mediocre wait queue, implemented as a spinlock around a `VecDeque` of
-/// waiters.
-// TODO(eliza): this can almost certainly be replaced with an intrusive list of
-// some kind, but crossbeam uses a spinlock + vec, so it's _probably_ fine...
-// XXX(eliza): the biggest downside of this is that it can't be used without
-// `liballoc`, which is sad for `no-std` async-await users...
+use core::{fmt, marker::PhantomPinned, pin::Pin, ptr::NonNull};
+
+#[derive(Debug)]
 pub(crate) struct WaitQueue<T> {
-    locked: CachePadded<AtomicUsize>,
-    queue: UnsafeCell<VecDeque<T>>,
+    state: CachePadded<AtomicUsize>,
+    list: Mutex<List<T>>,
 }
 
-pub(crate) struct Locked<'a, T> {
-    queue: &'a WaitQueue<T>,
-    state: State,
+#[derive(Debug)]
+pub(crate) struct Waiter<T> {
+    node: UnsafeCell<Node<T>>,
+    queued: AtomicBool,
 }
 
-#[derive(Copy, Clone)]
-struct State(usize);
+#[derive(Debug)]
+#[pin_project::pin_project]
+struct Node<T> {
+    next: Link<Waiter<T>>,
+    prev: Link<Waiter<T>>,
+    waiter: Option<T>,
 
-impl<T> WaitQueue<T> {
+    // This type is !Unpin due to the heuristic from:
+    // <https://github.com/rust-lang/rust/pull/82834>
+    #[pin]
+    _pin: PhantomPinned,
+}
+
+type Link<T> = Option<NonNull<T>>;
+
+struct List<T> {
+    head: Link<Waiter<T>>,
+    tail: Link<Waiter<T>>,
+}
+
+const CLOSED: usize = 1 << 0;
+const ONE_QUEUED: usize = 1 << 1;
+
+impl<T: Notify + Unpin> WaitQueue<T> {
     pub(crate) fn new() -> Self {
         Self {
-            locked: CachePadded(AtomicUsize::new(State::UNLOCKED.0 | State::EMPTY.0)),
-            queue: UnsafeCell::new(VecDeque::new()),
+            state: CachePadded(AtomicUsize::new(0)),
+            list: Mutex::new(List::new()),
         }
     }
 
-    fn compare_exchange_weak(
+    pub(crate) fn push_waiter(
         &self,
-        curr: State,
-        next: State,
-        success: Ordering,
-        failure: Ordering,
-    ) -> Result<State, State> {
-        let res = self
-            .locked
-            .compare_exchange_weak(curr.0, next.0, success, failure)
-            .map(State)
-            .map_err(State);
-        test_println!(
-            "self.state.compare_exchange_weak({:?}, {:?}, {:?}, {:?}) = {:?}",
-            curr,
-            next,
-            success,
-            failure,
-            res
-        );
-        res
-    }
-
-    fn fetch_clear(&self, state: State, order: Ordering) -> State {
-        let res = State(self.locked.fetch_and(!state.0, order));
-        test_println!(
-            "self.state.fetch_clear({:?}, {:?}) = {:?}",
-            state,
-            order,
-            res
-        );
-        res
-    }
-
-    fn lock(&self) -> Result<Locked<'_, T>, State> {
-        let mut backoff = Backoff::new();
-        let mut state = State(self.locked.load(Ordering::Relaxed));
-        loop {
-            test_dbg!(&state);
-            if test_dbg!(state.contains(State::CLOSED)) {
-                return Err(state);
-            }
-
-            if !test_dbg!(state.contains(State::LOCKED)) {
-                match self.compare_exchange_weak(
-                    state,
-                    State(state.0 | State::LOCKED.0),
-                    AcqRel,
-                    Acquire,
-                ) {
-                    Ok(_) => return Ok(Locked { queue: self, state }),
-                    Err(actual) => {
-                        state = actual;
-                        backoff.spin();
-                    }
-                }
-            } else {
-                state = State(self.locked.load(Ordering::Relaxed));
-                backoff.spin_yield();
-            }
+        waiter: &mut Option<Pin<&mut Waiter<T>>>,
+        mk_waiter: impl FnOnce() -> T,
+    ) -> WaitResult {
+        test_println!("WaitQueue::push_waiter()");
+        let mut state = test_dbg!(self.state.load(Acquire));
+        if test_dbg!(state & CLOSED != 0) {
+            return WaitResult::TxClosed;
         }
-    }
 
-    pub(crate) fn push_waiter(&self, mk_waiter: impl FnOnce() -> T) -> WaitResult {
-        if let Ok(mut lock) = self.lock() {
-            if lock.state.queued() > 0 {
-                lock.state = lock.state.sub_queued();
+        if test_dbg!(waiter.is_some()) {
+            while test_dbg!(state > CLOSED) {
+                match test_dbg!(self.state.compare_exchange_weak(
+                    state,
+                    state.saturating_sub(ONE_QUEUED),
+                    AcqRel,
+                    Acquire
+                )) {
+                    Ok(_) => return WaitResult::Notified,
+                    Err(actual) => state = test_dbg!(actual),
+                }
+            }
+
+            if test_dbg!(state & CLOSED != 0) {
+                return WaitResult::TxClosed;
+            }
+
+            let mut list = self.list.lock();
+            let state = test_dbg!(self.state.load(Acquire));
+            if test_dbg!(state >= ONE_QUEUED) {
+                self.state
+                    .compare_exchange(state, state.saturating_sub(ONE_QUEUED), AcqRel, Acquire)
+                    .expect("should succeed");
                 return WaitResult::Notified;
             }
-            lock.queue.queue.with_mut(|q| unsafe {
-                (*q).push_back(mk_waiter());
-            });
-            WaitResult::Wait
+
+            if let Some(mut waiter) = waiter.take() {
+                test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);
+                if test_dbg!(waiter.queued.swap(true, Relaxed)) {
+                    return WaitResult::Wait;
+                }
+                waiter.as_mut().node.with_mut(|node| unsafe {
+                    let node = &mut *node;
+                    node.waiter = Some(mk_waiter());
+                    test_println!("-> push {:?}", node);
+                });
+                list.push_front(waiter);
+            } else {
+                unreachable!("this could be unchecked...")
+            }
+        }
+
+        WaitResult::Wait
+    }
+
+    pub(crate) fn notify(&self) -> bool {
+        test_println!("WaitQueue::notify()");
+        if let Some(node) = test_dbg!(self.list.lock().pop_back()) {
+            node.notify();
+            true
         } else {
-            WaitResult::TxClosed
+            self.state.fetch_add(ONE_QUEUED, Release);
+            false
         }
     }
 
-    pub(crate) fn drain(&self) {
-        if let Ok(lock) = self.lock() {
-            // if test_dbg!(lock.state.contains(State::EMPTY)) {
-            //     return;
-            // }
-            lock.queue.queue.with_mut(|q| {
-                let waiters = unsafe { (*q).drain(..) };
-                for waiter in waiters {
-                    drop(waiter);
+    pub(crate) fn close(&self) {
+        test_println!("WaitQueue::close()");
+        test_dbg!(self.state.fetch_or(CLOSED, Release));
+        let mut list = self.list.lock();
+        while let Some(node) = list.pop_back() {
+            node.notify();
+        }
+    }
+}
+
+// === impl Waiter ===
+
+impl<T: Notify> Waiter<T> {
+    pub(crate) fn new() -> Self {
+        Self {
+            node: UnsafeCell::new(Node {
+                next: None,
+                prev: None,
+                waiter: None,
+                _pin: PhantomPinned,
+            }),
+            queued: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn register(&self, mk_waiter: impl FnOnce() -> T) {
+        unsafe {
+            self.with_node(|node| {
+                if node.waiter.is_none() {
+                    node.waiter = Some(mk_waiter())
+                }
+            })
+        }
+    }
+
+    fn notify(self: Pin<&mut Self>) -> bool {
+        unsafe {
+            self.with_node(|node| {
+                if let Some(waker) = node.waiter.take() {
+                    waker.notify();
+                    true
+                } else {
+                    false
                 }
             })
         }
     }
 }
 
-impl<T: Notify> WaitQueue<T> {
-    pub(crate) fn notify(&self) -> bool {
-        test_println!("notifying tx");
+impl<T> Waiter<T> {
+    unsafe fn with_node<U>(&self, f: impl FnOnce(&mut Node<T>) -> U) -> U {
+        self.node.with_mut(|node| f(&mut *node))
+    }
 
-        if let Ok(mut lock) = self.lock() {
-            return lock.notify();
+    unsafe fn set_prev(&mut self, prev: Option<NonNull<Waiter<T>>>) {
+        self.node.with_mut(|node| (*node).prev = prev);
+    }
+
+    // unsafe fn set_next(&mut self, next: Option<NonNull<Waiter<T>>>) {
+    //     self.node.with_mut(|node| (*node).next = next);
+    // }
+
+    unsafe fn take_prev(&mut self) -> Option<NonNull<Waiter<T>>> {
+        self.node.with_mut(|node| (*node).prev.take())
+    }
+
+    unsafe fn take_next(&mut self) -> Option<NonNull<Waiter<T>>> {
+        self.node.with_mut(|node| (*node).next.take())
+    }
+}
+
+impl<T: Notify> Waiter<T> {
+    pub(crate) fn remove(self: Pin<&mut Self>, q: &WaitQueue<T>) {
+        test_println!("Waiter::remove({:p})", self);
+
+        let mut list = q.list.lock();
+
+        if !test_dbg!(self.queued.swap(false, Relaxed)) {
+            test_println!("-> the node was not queued");
+            return;
         }
 
-        false
+        unsafe {
+            list.remove(self);
+        }
     }
 }
 
-impl<T> Drop for WaitQueue<T> {
-    fn drop(&mut self) {
-        self.drain();
-    }
-}
+unsafe impl<T: Send> Send for Waiter<T> {}
+unsafe impl<T: Send> Sync for Waiter<T> {}
 
-impl<T> fmt::Debug for WaitQueue<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("WaitQueue(..)")
-    }
-}
+// === impl List ===
 
-impl<T: Notify> Locked<'_, T> {
-    fn notify(&mut self) -> bool {
-        // if test_dbg!(self.state.contains(State::EMPTY)) {
-        //     self.state = self.state.add_queued();
-        //     return false;
-        // }
-        self.queue.queue.with_mut(|q| {
-            let q = unsafe { &mut *q };
-            if let Some(waiter) = q.pop_front() {
-                waiter.notify();
-                if q.is_empty() {
-                    self.queue.fetch_clear(State::EMPTY, Release);
-                }
-                true
-            } else {
-                self.state = self.state.add_queued();
-                false
+impl<T> List<T> {
+    fn new() -> Self {
+        Self {
+            head: None,
+            tail: None,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        debug_assert_eq!(self.head.is_none(), self.tail.is_none());
+        test_dbg!(self.head.is_none())
+    }
+
+    fn push_front(&mut self, waiter: Pin<&mut Waiter<T>>) {
+        unsafe {
+            waiter.with_node(|node| {
+                node.next = self.head;
+                node.prev = None;
+            })
+        }
+
+        let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(waiter)) };
+
+        assert_ne!(self.head, Some(ptr), "tried to push the same waiter twice!");
+        if let Some(mut head) = self.head {
+            unsafe {
+                head.as_mut().set_prev(Some(ptr));
             }
-        })
+        }
+
+        self.head = Some(ptr);
+        if self.tail.is_none() {
+            self.tail = Some(ptr);
+        }
     }
 
-    // TODO(eliza): future cancellation nonsense...
-    #[allow(dead_code)]
-    pub(crate) fn remove(&mut self, i: usize) -> Option<T> {
-        self.queue.queue.with_mut(|q| unsafe { (*q).remove(i) })
+    fn pop_back(&mut self) -> Option<Pin<&mut Waiter<T>>> {
+        let mut last = self.tail?;
+        test_println!("List::pop_back() -> {:p}", last);
+
+        unsafe {
+            let last = last.as_mut();
+
+            let _was_queued = test_dbg!(last.queued.swap(false, Relaxed));
+            debug_assert!(_was_queued, "should have been queued!");
+            let prev = last.take_prev();
+
+            if let Some(mut prev) = prev {
+                prev.as_mut().take_next();
+            } else {
+                self.head = None;
+            }
+
+            self.tail = prev;
+            last.take_next();
+
+            Some(Pin::new_unchecked(last))
+        }
+    }
+
+    unsafe fn remove(&mut self, node: Pin<&mut Waiter<T>>) {
+        let node_ref = node.get_unchecked_mut();
+        let prev = node_ref.take_prev();
+        let next = node_ref.take_next();
+        let ptr = NonNull::from(node_ref);
+
+        if let Some(mut prev) = prev {
+            prev.as_mut().with_node(|prev| {
+                debug_assert_eq!(prev.next, Some(ptr));
+                prev.next = next;
+            })
+        } else if self.head == Some(ptr) {
+            self.head = next;
+        }
+
+        if let Some(mut next) = next {
+            next.as_mut().with_node(|next| {
+                debug_assert_eq!(next.prev, Some(ptr));
+                next.prev = prev;
+            });
+        } else if self.tail == Some(ptr) {
+            self.tail = prev;
+        };
     }
 }
 
-impl<T> Drop for Locked<'_, T> {
-    fn drop(&mut self) {
-        test_dbg!(State(self.queue.locked.swap(self.state.0, Release)));
-    }
-}
-
-impl<T: panic::UnwindSafe> panic::UnwindSafe for WaitQueue<T> {}
-impl<T: panic::RefUnwindSafe> panic::RefUnwindSafe for WaitQueue<T> {}
-unsafe impl<T: Send> Send for WaitQueue<T> {}
-unsafe impl<T: Send> Sync for WaitQueue<T> {}
-
-// === impl State ===
-
-impl State {
-    const UNLOCKED: Self = Self(0b00);
-    const LOCKED: Self = Self(0b01);
-    const EMPTY: Self = Self(0b10);
-    const CLOSED: Self = Self(0b100);
-
-    const FLAG_BITS: usize = Self::LOCKED.0 | Self::EMPTY.0 | Self::CLOSED.0;
-    const QUEUED_SHIFT: usize = Self::FLAG_BITS.trailing_ones() as usize;
-    const QUEUED_ONE: usize = 1 << Self::QUEUED_SHIFT;
-
-    fn queued(self) -> usize {
-        self.0 >> Self::QUEUED_SHIFT
-    }
-
-    fn add_queued(self) -> Self {
-        Self(self.0 + Self::QUEUED_ONE)
-    }
-
-    fn contains(self, Self(state): Self) -> bool {
-        self.0 & state == state
-    }
-
-    fn sub_queued(self) -> Self {
-        let flags = self.0 & Self::FLAG_BITS;
-        Self(self.0 & (!Self::FLAG_BITS).saturating_sub(Self::QUEUED_ONE) | flags)
-    }
-}
-
-impl fmt::Debug for State {
+impl<T> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("State(")?;
-        let mut has_flags = false;
-
-        fmt_bits!(self, f, has_flags, LOCKED, EMPTY, CLOSED);
-
-        if !has_flags {
-            f.write_str("UNLOCKED")?;
-        }
-
-        let queued = self.queued();
-        if queued > 0 {
-            write!(f, ", queued: {})", queued)?;
-        } else {
-            f.write_str(")")?;
-        }
-
-        Ok(())
+        f.debug_struct("List")
+            .field("head", &self.head)
+            .field("tail", &self.tail)
+            .finish()
     }
 }
+
+unsafe impl<T: Send> Send for List<T> {}
