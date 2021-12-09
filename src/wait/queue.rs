@@ -81,12 +81,18 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             }
 
             let mut list = self.list.lock();
-            let state = test_dbg!(self.state.load(Acquire));
-            if test_dbg!(state >= ONE_QUEUED) {
-                self.state
-                    .compare_exchange(state, state.saturating_sub(ONE_QUEUED), AcqRel, Acquire)
-                    .expect("should succeed");
-                return WaitResult::Notified;
+            // Reload the state inside the lock.
+            state = test_dbg!(self.state.load(Acquire));
+            while test_dbg!(state >= ONE_QUEUED) {
+                match test_dbg!(self.state.compare_exchange(
+                    state,
+                    state.saturating_sub(ONE_QUEUED),
+                    AcqRel,
+                    Acquire
+                )) {
+                    Ok(_) => return WaitResult::Notified,
+                    Err(actual) => state = actual,
+                }
             }
 
             if let Some(waiter) = waiter.take() {
@@ -118,7 +124,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             node.notify();
             true
         } else {
-            self.state.fetch_add(ONE_QUEUED, Release);
+            test_dbg!(self.state.fetch_add(ONE_QUEUED, Release));
             false
         }
     }
