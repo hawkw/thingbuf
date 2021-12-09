@@ -88,7 +88,6 @@ impl<T, N: Notify + Unpin> Inner<T, N> {
             crate::loom::hint::spin_loop();
             test_println!("draining_queue");
             self.tx_wait.close();
-            // self.tx_wait.drain();
         }
     }
 }
@@ -188,7 +187,6 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
                     // just in case someone sent a message while we were
                     // registering the waiter.
                     try_poll_recv!();
-                    // test_dbg!(self.tx_wait.notify());
                     return Poll::Pending;
                 }
                 WaitResult::TxClosed => {

@@ -1,6 +1,6 @@
 use crate::{
     loom::{
-        atomic::{AtomicBool, AtomicUsize, Ordering::*},
+        atomic::{AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
     util::{mutex::Mutex, CachePadded},
@@ -18,7 +18,6 @@ pub(crate) struct WaitQueue<T> {
 #[derive(Debug)]
 pub(crate) struct Waiter<T> {
     node: UnsafeCell<Node<T>>,
-    // queued: AtomicBool,
 }
 
 #[derive(Debug)]
@@ -98,11 +97,6 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             if let Some(waiter) = waiter.take() {
                 test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);
 
-                // if test_dbg!(waiter.queued.swap(true, Relaxed)) {
-                //     test_println!("waiter already queued");
-                //     return WaitResult::Wait;
-                // }
-
                 unsafe {
                     // Safety: the waker can only be registered while holding
                     // the wait queue lock. We are holding the lock, so no one
@@ -150,21 +144,17 @@ impl<T: Notify> Waiter<T> {
                 waiter: None,
                 _pin: PhantomPinned,
             }),
-            // queued: AtomicBool::new(false),
         }
     }
 
+    #[inline]
     fn notify(self: Pin<&mut Self>) -> bool {
-        unsafe {
-            self.with_node(|node| {
-                if let Some(waker) = node.waiter.take() {
-                    waker.notify();
-                    true
-                } else {
-                    false
-                }
-            })
+        let waker = unsafe { self.with_node(|node| node.waiter.take()) };
+        if let Some(waker) = waker {
+            waker.notify();
+            return true;
         }
+        false
     }
 }
 
@@ -193,16 +183,13 @@ impl<T> Waiter<T> {
 impl<T: Notify> Waiter<T> {
     pub(crate) fn remove(self: Pin<&mut Self>, q: &WaitQueue<T>) {
         test_println!("Waiter::remove({:p})", self);
-
-        let mut list = q.list.lock();
-
-        // if !test_dbg!(self.queued.swap(false, Relaxed)) {
-        //     test_println!("-> the node was not queued");
-        //     return;
-        // }
-
         unsafe {
-            list.remove(self);
+            // Safety: removing a node is unsafe even when the list is locked,
+            // because there's no way to guarantee that the node is part of
+            // *this* list. However, the potential callers of this method will
+            // never have access to any other linked lists, so we can just kind
+            // of assume that this is safe.
+            q.list.lock().remove(self);
         }
     }
 }
@@ -249,9 +236,6 @@ impl<T> List<T> {
 
         unsafe {
             let last = last.as_mut();
-
-            // let _was_queued = test_dbg!(last.queued.swap(false, Relaxed));
-            // debug_assert!(_was_queued, "should have been queued!");
             let prev = last.take_prev();
 
             if let Some(mut prev) = prev {
