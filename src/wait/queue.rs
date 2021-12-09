@@ -18,7 +18,7 @@ pub(crate) struct WaitQueue<T> {
 #[derive(Debug)]
 pub(crate) struct Waiter<T> {
     node: UnsafeCell<Node<T>>,
-    queued: AtomicBool,
+    // queued: AtomicBool,
 }
 
 #[derive(Debug)]
@@ -98,10 +98,10 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             if let Some(waiter) = waiter.take() {
                 test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);
 
-                if test_dbg!(waiter.queued.swap(true, Relaxed)) {
-                    test_println!("waiter already queued");
-                    return WaitResult::Wait;
-                }
+                // if test_dbg!(waiter.queued.swap(true, Relaxed)) {
+                //     test_println!("waiter already queued");
+                //     return WaitResult::Wait;
+                // }
 
                 unsafe {
                     // Safety: the waker can only be registered while holding
@@ -150,7 +150,7 @@ impl<T: Notify> Waiter<T> {
                 waiter: None,
                 _pin: PhantomPinned,
             }),
-            queued: AtomicBool::new(false),
+            // queued: AtomicBool::new(false),
         }
     }
 
@@ -196,10 +196,10 @@ impl<T: Notify> Waiter<T> {
 
         let mut list = q.list.lock();
 
-        if !test_dbg!(self.queued.swap(false, Relaxed)) {
-            test_println!("-> the node was not queued");
-            return;
-        }
+        // if !test_dbg!(self.queued.swap(false, Relaxed)) {
+        //     test_println!("-> the node was not queued");
+        //     return;
+        // }
 
         unsafe {
             list.remove(self);
@@ -250,8 +250,8 @@ impl<T> List<T> {
         unsafe {
             let last = last.as_mut();
 
-            let _was_queued = test_dbg!(last.queued.swap(false, Relaxed));
-            debug_assert!(_was_queued, "should have been queued!");
+            // let _was_queued = test_dbg!(last.queued.swap(false, Relaxed));
+            // debug_assert!(_was_queued, "should have been queued!");
             let prev = last.take_prev();
 
             if let Some(mut prev) = prev {

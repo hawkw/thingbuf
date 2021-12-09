@@ -188,7 +188,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
                     // just in case someone sent a message while we were
                     // registering the waiter.
                     try_poll_recv!();
-                    test_dbg!(self.tx_wait.notify());
+                    // test_dbg!(self.tx_wait.notify());
                     return Poll::Pending;
                 }
                 WaitResult::TxClosed => {

@@ -86,12 +86,19 @@ impl<T: Default> Sender<T> {
             type Output = Result<SendRef<'sender, T>, Closed>;
 
             fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                test_println!("SendRefFuture::poll({:p})", self);
                 // perform one send ref loop iteration
 
                 let this = self.as_mut().project();
+                let waiter = if test_dbg!(*this.has_been_queued) {
+                    None
+                } else {
+                    Some(this.waiter)
+                };
                 this.tx
                     .inner
-                    .poll_send_ref(Some(this.waiter), |waker| {
+                    .poll_send_ref(waiter, |waker| {
+                        // if this is called, we are definitely getting queued.
                         *this.has_been_queued = true;
 
                         // if the wait node does not already have a waker, or the task
@@ -108,15 +115,21 @@ impl<T: Default> Sender<T> {
                             return;
                         }
 
-                        *waker = Some(my_waker.clone())
+                        *waker = Some(my_waker.clone());
                     })
-                    .map(|ok| ok.map(SendRef))
+                    .map(|ok| {
+                        // avoid having to lock the list to remove a node that's
+                        // definitely not queued.
+                        *this.has_been_queued = false;
+                        ok.map(SendRef)
+                    })
             }
         }
 
         #[pin_project::pinned_drop]
         impl<T> PinnedDrop for SendRefFuture<'_, T> {
             fn drop(self: Pin<&mut Self>) {
+                test_println!("SendRefFuture::drop({:p})", self);
                 if test_dbg!(self.has_been_queued) {
                     let this = self.project();
                     this.waiter.remove(&this.tx.inner.tx_wait)
