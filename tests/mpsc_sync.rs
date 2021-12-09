@@ -8,7 +8,7 @@ fn basically_works() {
     const N_SENDS: usize = 10;
     const N_PRODUCERS: usize = 10;
 
-    fn start_producer(mut tx: sync::Sender<usize>, n: usize) -> thread::JoinHandle<()> {
+    fn start_producer(tx: sync::Sender<usize>, n: usize) -> thread::JoinHandle<()> {
         let tag = n * N_SENDS;
         thread::Builder::new()
             .name(format!("producer {}", n))
@@ -56,7 +56,7 @@ fn tx_close_drains_queue() {
     for i in 0..10000 {
         println!("\n\n--- iteration {} ---\n\n", i);
 
-        let (mut tx, rx) = sync::channel(ThingBuf::new(LEN));
+        let (tx, rx) = sync::channel(ThingBuf::new(LEN));
         let producer = thread::spawn(move || {
             for i in 0..LEN {
                 tx.send(i).unwrap();

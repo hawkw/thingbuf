@@ -80,7 +80,7 @@ impl<T: Default> Sender<T> {
         }
     }
 
-    pub fn send(&mut self, val: T) -> Result<(), Closed<T>> {
+    pub fn send(&self, val: T) -> Result<(), Closed<T>> {
         match self.send_ref() {
             Err(Closed(())) => Err(Closed(val)),
             Ok(mut slot) => {

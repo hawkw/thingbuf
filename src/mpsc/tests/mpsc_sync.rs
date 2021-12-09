@@ -193,7 +193,7 @@ fn mpsc_send_recv_no_wrap() {
     })
 }
 
-fn do_producer(mut tx: sync::Sender<usize>, tag: usize) -> thread::JoinHandle<()> {
+fn do_producer(tx: sync::Sender<usize>, tag: usize) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         test_println!("SENDING {:?}", tag);
         tx.send(tag).unwrap();
@@ -205,7 +205,7 @@ fn do_producer(mut tx: sync::Sender<usize>, tag: usize) -> thread::JoinHandle<()
 fn spsc_send_recv_in_order_no_wrap() {
     const N_SENDS: usize = 4;
     loom::model(|| {
-        let (mut tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS));
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS));
         let consumer = thread::spawn(move || {
             for i in 1..=N_SENDS {
                 assert_eq!(rx.recv(), Some(i));
@@ -234,7 +234,7 @@ fn spsc_send_recv_in_order_no_wrap() {
 fn spsc_send_recv_in_order_wrap() {
     const N_SENDS: usize = 2;
     loom::model(|| {
-        let (mut tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS / 2));
+        let (tx, rx) = sync::channel(ThingBuf::<usize>::new(N_SENDS / 2));
         let consumer = thread::spawn(move || {
             for i in 1..=N_SENDS {
                 assert_eq!(rx.recv(), Some(i));
@@ -266,7 +266,7 @@ fn tx_close_wakes() {
 fn tx_close_drains_queue() {
     const LEN: usize = 4;
     loom::model(|| {
-        let (mut tx, rx) = sync::channel(ThingBuf::new(LEN));
+        let (tx, rx) = sync::channel(ThingBuf::new(LEN));
         let producer = thread::spawn(move || {
             for i in 0..LEN {
                 tx.send(i).unwrap();
