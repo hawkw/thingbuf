@@ -12,17 +12,13 @@
 
 use crate::{
     loom::{atomic::AtomicUsize, hint},
-    util::{
-        wait::{Notify, WaitCell, WaitResult},
-        Backoff,
-    },
+    util::Backoff,
+    wait::{queue, Notify, WaitCell, WaitQueue, WaitResult},
     Ref, ThingBuf,
 };
 use core::fmt;
+use core::pin::Pin;
 use core::task::Poll;
-
-#[cfg(feature = "alloc")]
-use crate::util::wait::{NotifyOnDrop, WaitQueue};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -39,8 +35,7 @@ struct Inner<T, N: Notify> {
     thingbuf: ThingBuf<T>,
     rx_wait: WaitCell<N>,
     tx_count: AtomicUsize,
-    #[cfg(feature = "alloc")]
-    tx_wait: WaitQueue<NotifyOnDrop<N>>,
+    tx_wait: WaitQueue<N>,
 }
 
 struct SendRefInner<'a, T, N: Notify> {
@@ -64,7 +59,7 @@ struct SendRefInner<'a, T, N: Notify> {
 }
 
 struct NotifyRx<'a, N: Notify>(&'a WaitCell<N>);
-struct NotifyTx<'a, N: Notify>(&'a WaitQueue<NotifyOnDrop<N>>);
+struct NotifyTx<'a, N: Notify + Unpin>(&'a WaitQueue<N>);
 
 // ==== impl TrySendError ===
 
@@ -78,13 +73,12 @@ impl TrySendError {
 }
 
 // ==== impl Inner ====
-impl<T, N: Notify> Inner<T, N> {
+impl<T, N: Notify + Unpin> Inner<T, N> {
     fn new(thingbuf: ThingBuf<T>) -> Self {
         Self {
             thingbuf,
             rx_wait: WaitCell::new(),
             tx_count: AtomicUsize::new(1),
-            #[cfg(feature = "alloc")]
             tx_wait: WaitQueue::new(),
         }
     }
@@ -93,12 +87,12 @@ impl<T, N: Notify> Inner<T, N> {
         if self.thingbuf.core.close() {
             crate::loom::hint::spin_loop();
             test_println!("draining_queue");
-            self.tx_wait.drain();
+            self.tx_wait.close();
         }
     }
 }
 
-impl<T: Default, N: Notify> Inner<T, N> {
+impl<T: Default, N: Notify + Unpin> Inner<T, N> {
     fn try_send_ref(&self) -> Result<SendRefInner<'_, T, N>, TrySendError> {
         self.thingbuf
             .core
@@ -126,7 +120,8 @@ impl<T: Default, N: Notify> Inner<T, N> {
     /// may yield, or might park the thread.
     fn poll_send_ref(
         &self,
-        mk_waiter: impl Fn() -> N,
+        mut node: Option<Pin<&mut queue::Waiter<N>>>,
+        mut register: impl FnMut(&mut Option<N>),
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
         let mut backoff = Backoff::new();
         // try to send a few times in a loop, in case the receiver notifies us
@@ -141,11 +136,7 @@ impl<T: Default, N: Notify> Inner<T, N> {
             }
 
             // try to push a waiter
-            let pushed_waiter = self.tx_wait.push_waiter(|| {
-                let current = mk_waiter();
-                test_println!("parking sender ({:?})", current);
-                NotifyOnDrop::new(current)
-            });
+            let pushed_waiter = self.tx_wait.push_waiter(&mut node, &mut register);
 
             match test_dbg!(pushed_waiter) {
                 WaitResult::TxClosed => {
@@ -196,7 +187,6 @@ impl<T: Default, N: Notify> Inner<T, N> {
                     // just in case someone sent a message while we were
                     // registering the waiter.
                     try_poll_recv!();
-                    test_dbg!(self.tx_wait.notify());
                     return Poll::Pending;
                 }
                 WaitResult::TxClosed => {
@@ -280,7 +270,7 @@ impl<N: Notify> Drop for NotifyRx<'_, N> {
     }
 }
 
-impl<N: Notify> Drop for NotifyTx<'_, N> {
+impl<N: Notify + Unpin> Drop for NotifyTx<'_, N> {
     #[inline]
     fn drop(&mut self) {
         test_println!("notifying tx ({})", core::any::type_name::<N>());

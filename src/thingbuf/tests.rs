@@ -97,13 +97,15 @@ fn linearizable() {
     fn thread(i: usize, q: &Arc<ThingBuf<usize>>) -> impl FnOnce() {
         let q = q.clone();
         move || {
-            while q
-                .push_ref()
-                .map(|mut val| {
-                    *val = i;
-                })
-                .is_err()
-            {}
+            let mut pushed = false;
+            while !pushed {
+                pushed = q
+                    .push_ref()
+                    .map(|mut val| {
+                        *val = i;
+                    })
+                    .is_ok();
+            }
 
             if let Some(mut val) = q.pop_ref() {
                 *val = 0;

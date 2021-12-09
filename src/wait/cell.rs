@@ -1,4 +1,3 @@
-use super::{Notify, WaitResult};
 use crate::{
     loom::{
         atomic::{
@@ -8,6 +7,7 @@ use crate::{
         cell::UnsafeCell,
     },
     util::panic::{self, RefUnwindSafe, UnwindSafe},
+    wait::{Notify, WaitResult},
 };
 use core::{fmt, ops};
 
@@ -37,6 +37,7 @@ pub(crate) struct WaitCell<T> {
 struct State(usize);
 
 // === impl WaitCell ===
+
 impl<T> WaitCell<T> {
     #[cfg(not(all(loom, test)))]
     pub(crate) const fn new() -> Self {

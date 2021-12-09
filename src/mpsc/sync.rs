@@ -10,6 +10,7 @@ use crate::{
         sync::Arc,
         thread::{self, Thread},
     },
+    wait::queue,
     Ref, ThingBuf,
 };
 use core::fmt;
@@ -54,9 +55,23 @@ impl<T: Default> Sender<T> {
     }
 
     pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
+        let mut waiter = queue::Waiter::new();
         loop {
             // perform one send ref loop iteration
-            if let Poll::Ready(result) = self.inner.poll_send_ref(thread::current) {
+
+            let waiter = unsafe {
+                // Safety: in this case, it's totally safe to pin the waiter, as
+                // it is owned uniquely by this function, and it cannot possibly
+                // be moved while this thread is parked.
+                Pin::new_unchecked(&mut waiter)
+            };
+            if let Poll::Ready(result) = self.inner.poll_send_ref(Some(waiter), |thread| {
+                if thread.is_none() {
+                    let current = thread::current();
+                    test_println!("registering {:?}", current);
+                    *thread = Some(current);
+                }
+            }) {
                 return result.map(SendRef);
             }
 

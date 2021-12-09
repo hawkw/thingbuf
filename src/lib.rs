@@ -7,6 +7,7 @@ mod macros;
 
 mod loom;
 mod util;
+mod wait;
 
 feature! {
     #![feature = "alloc"]
@@ -266,6 +267,7 @@ impl Core {
                     return if test_dbg!(tail & self.closed != 0) {
                         Err(mpsc::TrySendError::Closed(()))
                     } else {
+                        test_println!("--> channel full!");
                         Err(mpsc::TrySendError::Full(()))
                     };
                 }

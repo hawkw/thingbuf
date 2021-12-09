@@ -4,6 +4,7 @@ use crate::{
         atomic::{self, Ordering},
         sync::Arc,
     },
+    wait::queue,
     Ref, ThingBuf,
 };
 use core::{
@@ -73,22 +74,75 @@ impl<T: Default> Sender<T> {
     }
 
     pub async fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
-        // This future is private because if we replace the waiter queue thing with an
-        // intrusive list, we won't want to expose the future type publicly, for safety reasons.
-        struct SendRefFuture<'sender, T>(&'sender Sender<T>);
+        #[pin_project::pin_project(PinnedDrop)]
+        struct SendRefFuture<'sender, T> {
+            tx: &'sender Sender<T>,
+            has_been_queued: bool,
+            #[pin]
+            waiter: queue::Waiter<Waker>,
+        }
+
         impl<'sender, T: Default + 'sender> Future for SendRefFuture<'sender, T> {
             type Output = Result<SendRef<'sender, T>, Closed>;
 
-            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                test_println!("SendRefFuture::poll({:p})", self);
                 // perform one send ref loop iteration
-                self.0
+
+                let this = self.as_mut().project();
+                let waiter = if test_dbg!(*this.has_been_queued) {
+                    None
+                } else {
+                    Some(this.waiter)
+                };
+                this.tx
                     .inner
-                    .poll_send_ref(|| cx.waker().clone())
-                    .map(|ok| ok.map(SendRef))
+                    .poll_send_ref(waiter, |waker| {
+                        // if this is called, we are definitely getting queued.
+                        *this.has_been_queued = true;
+
+                        // if the wait node does not already have a waker, or the task
+                        // has been polled with a waker that won't wake the previous
+                        // one, register a new waker.
+                        let my_waker = cx.waker();
+                        // do we need to re-register?
+                        let will_wake = waker
+                            .as_ref()
+                            .map(|waker| test_dbg!(waker.will_wake(my_waker)))
+                            .unwrap_or(false);
+
+                        if test_dbg!(will_wake) {
+                            return;
+                        }
+
+                        *waker = Some(my_waker.clone());
+                    })
+                    .map(|ok| {
+                        // avoid having to lock the list to remove a node that's
+                        // definitely not queued.
+                        *this.has_been_queued = false;
+                        ok.map(SendRef)
+                    })
             }
         }
 
-        SendRefFuture(self).await
+        #[pin_project::pinned_drop]
+        impl<T> PinnedDrop for SendRefFuture<'_, T> {
+            fn drop(self: Pin<&mut Self>) {
+                test_println!("SendRefFuture::drop({:p})", self);
+                if test_dbg!(self.has_been_queued) {
+                    let this = self.project();
+                    this.waiter.remove(&this.tx.inner.tx_wait)
+                }
+            }
+        }
+
+        SendRefFuture {
+            tx: self,
+            has_been_queued: false,
+            waiter: queue::Waiter::new(),
+        }
+        .await
     }
 
     pub async fn send(&self, val: T) -> Result<(), Closed<T>> {
@@ -203,5 +257,46 @@ impl<'a, T: Default> Future for RecvFuture<'a, T> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.rx.poll_recv(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ThingBuf;
+
+    fn _assert_sync<T: Sync>(_: T) {}
+    fn _assert_send<T: Send>(_: T) {}
+
+    #[test]
+    fn recv_ref_future_is_send() {
+        fn _compiles() {
+            let (_, rx) = channel::<usize>(ThingBuf::new(10));
+            _assert_send(rx.recv_ref());
+        }
+    }
+
+    #[test]
+    fn recv_ref_future_is_sync() {
+        fn _compiles() {
+            let (_, rx) = channel::<usize>(ThingBuf::new(10));
+            _assert_sync(rx.recv_ref());
+        }
+    }
+
+    #[test]
+    fn send_ref_future_is_send() {
+        fn _compiles() {
+            let (tx, _) = channel::<usize>(ThingBuf::new(10));
+            _assert_send(tx.send_ref());
+        }
+    }
+
+    #[test]
+    fn send_ref_future_is_sync() {
+        fn _compiles() {
+            let (tx, _) = channel::<usize>(ThingBuf::new(10));
+            _assert_sync(tx.send_ref());
+        }
     }
 }
