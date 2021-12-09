@@ -13,7 +13,7 @@
 use crate::{
     loom::{atomic::AtomicUsize, hint},
     util::Backoff,
-    wait::{Notify, WaitCell, WaitQueue, WaitResult, Waiter},
+    wait::{queue, Notify, WaitCell, WaitQueue, WaitResult},
     Ref, ThingBuf,
 };
 use core::fmt;
@@ -121,8 +121,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
     /// may yield, or might park the thread.
     fn poll_send_ref(
         &self,
-        mut node: Option<Pin<&mut Waiter<N>>>,
-        mut mk_waiter: impl FnMut() -> N,
+        mut node: Option<Pin<&mut queue::Waiter<N>>>,
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
         let mut backoff = Backoff::new();
         // try to send a few times in a loop, in case the receiver notifies us
@@ -137,7 +136,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
             }
 
             // try to push a waiter
-            let pushed_waiter = self.tx_wait.push_waiter(&mut node, &mut mk_waiter);
+            let pushed_waiter = self.tx_wait.push_waiter(&mut node);
 
             match test_dbg!(pushed_waiter) {
                 WaitResult::TxClosed => {

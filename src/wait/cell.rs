@@ -37,6 +37,7 @@ pub(crate) struct WaitCell<T> {
 struct State(usize);
 
 // === impl WaitCell ===
+
 impl<T> WaitCell<T> {
     #[cfg(not(all(loom, test)))]
     pub(crate) const fn new() -> Self {

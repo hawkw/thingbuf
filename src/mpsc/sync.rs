@@ -10,7 +10,7 @@ use crate::{
         sync::Arc,
         thread::{self, Thread},
     },
-    wait::Waiter,
+    wait::queue,
     Ref, ThingBuf,
 };
 use core::fmt;
@@ -55,7 +55,8 @@ impl<T: Default> Sender<T> {
     }
 
     pub fn send_ref(&mut self) -> Result<SendRef<'_, T>, Closed> {
-        let mut waiter = Waiter::new();
+        let mut waiter = queue::Waiter::new();
+        waiter.register(thread::current);
         loop {
             // perform one send ref loop iteration
 
@@ -65,7 +66,7 @@ impl<T: Default> Sender<T> {
                 // be moved while this thread is parked.
                 Pin::new_unchecked(&mut waiter)
             };
-            if let Poll::Ready(result) = self.inner.poll_send_ref(Some(waiter), thread::current) {
+            if let Poll::Ready(result) = self.inner.poll_send_ref(Some(waiter)) {
                 return result.map(SendRef);
             }
 

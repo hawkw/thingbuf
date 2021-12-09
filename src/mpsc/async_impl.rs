@@ -4,7 +4,7 @@ use crate::{
         atomic::{self, Ordering},
         sync::Arc,
     },
-    wait::Waiter,
+    wait::queue,
     Ref, ThingBuf,
 };
 use core::{
@@ -79,7 +79,7 @@ impl<T: Default> Sender<T> {
             tx: &'sender Sender<T>,
             has_been_queued: bool,
             #[pin]
-            waiter: Waiter<Waker>,
+            waiter: queue::Waiter<Waker>,
         }
 
         impl<'sender, T: Default + 'sender> Future for SendRefFuture<'sender, T> {
@@ -89,14 +89,30 @@ impl<T: Default> Sender<T> {
                 // perform one send ref loop iteration
 
                 let this = self.as_mut().project();
-                let queued = this.has_been_queued;
-                this.tx
-                    .inner
-                    .poll_send_ref(Some(this.waiter), move || {
-                        *queued = true;
-                        cx.waker().clone()
-                    })
-                    .map(|ok| ok.map(SendRef))
+                // if the wait node does not already have a waker, or the task
+                // has been polled with a waker that won't wake the previous
+                // one, register a new waker.
+                this.waiter.register_with(|waker| {
+                    let my_waker = cx.waker();
+                    // do we need to re-register?
+                    let will_wake = waker
+                        .as_ref()
+                        .map(|waker| test_dbg!(waker.will_wake(my_waker)))
+                        .unwrap_or(false);
+                    if !will_wake {
+                        return;
+                    }
+
+                    *waker = Some(my_waker.clone())
+                });
+
+                match this.tx.inner.poll_send_ref(Some(this.waiter)) {
+                    Poll::Ready(ok) => Poll::Ready(ok.map(SendRef)),
+                    Poll::Pending => {
+                        *this.has_been_queued = true;
+                        Poll::Pending
+                    }
+                }
             }
         }
 
@@ -113,7 +129,7 @@ impl<T: Default> Sender<T> {
         SendRefFuture {
             tx: self,
             has_been_queued: false,
-            waiter: Waiter::new(),
+            waiter: queue::Waiter::new(),
         }
         .await
     }

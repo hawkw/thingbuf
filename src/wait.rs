@@ -1,12 +1,9 @@
 use crate::util::panic::UnwindSafe;
 use core::{fmt, task::Waker};
 
-mod wait_cell;
-mod wait_queue;
-pub(crate) use self::{
-    wait_cell::WaitCell,
-    wait_queue::{WaitQueue, Waiter},
-};
+mod cell;
+pub(crate) mod queue;
+pub(crate) use self::{cell::WaitCell, queue::WaitQueue};
 
 #[cfg(feature = "std")]
 use crate::loom::thread;
