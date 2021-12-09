@@ -99,7 +99,7 @@ impl<T: Default> Sender<T> {
                         .as_ref()
                         .map(|waker| test_dbg!(waker.will_wake(my_waker)))
                         .unwrap_or(false);
-                    if !will_wake {
+                    if test_dbg!(will_wake) {
                         return;
                     }
 
