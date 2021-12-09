@@ -79,6 +79,7 @@ mod inner {
             fmt::Subscriber::builder()
                 .with_writer(|| TracebufWriter)
                 .without_time()
+                .with_max_level(tracing::Level::TRACE)
                 .finish()
                 .with(filter)
                 .init();
