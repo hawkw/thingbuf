@@ -56,7 +56,6 @@ impl<T: Default> Sender<T> {
 
     pub fn send_ref(&mut self) -> Result<SendRef<'_, T>, Closed> {
         let mut waiter = queue::Waiter::new();
-        waiter.register(thread::current);
         loop {
             // perform one send ref loop iteration
 
@@ -66,7 +65,13 @@ impl<T: Default> Sender<T> {
                 // be moved while this thread is parked.
                 Pin::new_unchecked(&mut waiter)
             };
-            if let Poll::Ready(result) = self.inner.poll_send_ref(Some(waiter)) {
+            if let Poll::Ready(result) = self.inner.poll_send_ref(Some(waiter), |thread| {
+                if thread.is_none() {
+                    let current = thread::current();
+                    test_println!("registering {:?}", current);
+                    *thread = Some(current);
+                }
+            }) {
                 return result.map(SendRef);
             }
 

@@ -89,30 +89,28 @@ impl<T: Default> Sender<T> {
                 // perform one send ref loop iteration
 
                 let this = self.as_mut().project();
-                // if the wait node does not already have a waker, or the task
-                // has been polled with a waker that won't wake the previous
-                // one, register a new waker.
-                this.waiter.register_with(|waker| {
-                    let my_waker = cx.waker();
-                    // do we need to re-register?
-                    let will_wake = waker
-                        .as_ref()
-                        .map(|waker| test_dbg!(waker.will_wake(my_waker)))
-                        .unwrap_or(false);
-                    if test_dbg!(will_wake) {
-                        return;
-                    }
-
-                    *waker = Some(my_waker.clone())
-                });
-
-                match this.tx.inner.poll_send_ref(Some(this.waiter)) {
-                    Poll::Ready(ok) => Poll::Ready(ok.map(SendRef)),
-                    Poll::Pending => {
+                this.tx
+                    .inner
+                    .poll_send_ref(Some(this.waiter), |waker| {
                         *this.has_been_queued = true;
-                        Poll::Pending
-                    }
-                }
+
+                        // if the wait node does not already have a waker, or the task
+                        // has been polled with a waker that won't wake the previous
+                        // one, register a new waker.
+                        let my_waker = cx.waker();
+                        // do we need to re-register?
+                        let will_wake = waker
+                            .as_ref()
+                            .map(|waker| test_dbg!(waker.will_wake(my_waker)))
+                            .unwrap_or(false);
+
+                        if test_dbg!(will_wake) {
+                            return;
+                        }
+
+                        *waker = Some(my_waker.clone())
+                    })
+                    .map(|ok| ok.map(SendRef))
             }
         }
 

@@ -52,7 +52,11 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         }
     }
 
-    pub(crate) fn push_waiter(&self, waiter: &mut Option<Pin<&mut Waiter<T>>>) -> WaitResult {
+    pub(crate) fn push_waiter(
+        &self,
+        waiter: &mut Option<Pin<&mut Waiter<T>>>,
+        register: impl FnOnce(&mut Option<T>),
+    ) -> WaitResult {
         test_println!("WaitQueue::push_waiter()");
         let mut state = test_dbg!(self.state.load(Acquire));
         if test_dbg!(state & CLOSED != 0) {
@@ -87,9 +91,17 @@ impl<T: Notify + Unpin> WaitQueue<T> {
 
             if let Some(waiter) = waiter.take() {
                 test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);
+
                 if test_dbg!(waiter.queued.swap(true, Relaxed)) {
                     test_println!("waiter already queued");
                     return WaitResult::Wait;
+                }
+
+                unsafe {
+                    // Safety: the waker can only be registered while holding
+                    // the wait queue lock. We are holding the lock, so no one
+                    // else will try to touch the waker until we're done.
+                    waiter.with_node(|node| register(&mut node.waiter));
                 }
                 list.push_front(waiter);
             } else {
@@ -134,18 +146,6 @@ impl<T: Notify> Waiter<T> {
             }),
             queued: AtomicBool::new(false),
         }
-    }
-
-    pub(crate) fn register_with(&self, f: impl FnOnce(&mut Option<T>)) {
-        unsafe { self.with_node(|node| f(&mut node.waiter)) }
-    }
-
-    pub(crate) fn register(&self, mk_waiter: impl FnOnce() -> T) {
-        self.register_with(|waiter| {
-            if waiter.is_none() {
-                *waiter = Some(mk_waiter());
-            }
-        })
     }
 
     fn notify(self: Pin<&mut Self>) -> bool {

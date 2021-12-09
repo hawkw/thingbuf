@@ -122,6 +122,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
     fn poll_send_ref(
         &self,
         mut node: Option<Pin<&mut queue::Waiter<N>>>,
+        mut register: impl FnMut(&mut Option<N>),
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
         let mut backoff = Backoff::new();
         // try to send a few times in a loop, in case the receiver notifies us
@@ -136,7 +137,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
             }
 
             // try to push a waiter
-            let pushed_waiter = self.tx_wait.push_waiter(&mut node);
+            let pushed_waiter = self.tx_wait.push_waiter(&mut node, &mut register);
 
             match test_dbg!(pushed_waiter) {
                 WaitResult::TxClosed => {
