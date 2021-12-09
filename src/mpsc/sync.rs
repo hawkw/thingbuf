@@ -54,7 +54,7 @@ impl<T: Default> Sender<T> {
         self.inner.try_send(val)
     }
 
-    pub fn send_ref(&mut self) -> Result<SendRef<'_, T>, Closed> {
+    pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
         let mut waiter = queue::Waiter::new();
         loop {
             // perform one send ref loop iteration
