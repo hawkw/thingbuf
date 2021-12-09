@@ -217,14 +217,13 @@ impl<T> List<T> {
 
         let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(waiter)) };
 
-        assert_ne!(self.head, Some(ptr), "tried to push the same waiter twice!");
-        if let Some(mut head) = self.head {
+        debug_assert_ne!(self.head, Some(ptr), "tried to push the same waiter twice!");
+        if let Some(mut head) = self.head.replace(ptr) {
             unsafe {
                 head.as_mut().set_prev(Some(ptr));
             }
         }
 
-        self.head = Some(ptr);
         if self.tail.is_none() {
             self.tail = Some(ptr);
         }
@@ -238,10 +237,11 @@ impl<T> List<T> {
             let last = last.as_mut();
             let prev = last.take_prev();
 
-            if let Some(mut prev) = prev {
-                prev.as_mut().take_next();
-            } else {
-                self.head = None;
+            match prev {
+                Some(mut prev) => {
+                    let _ = prev.as_mut().take_next();
+                }
+                None => self.head = None,
             }
 
             self.tail = prev;
@@ -257,23 +257,27 @@ impl<T> List<T> {
         let next = node_ref.take_next();
         let ptr = NonNull::from(node_ref);
 
-        if let Some(mut prev) = prev {
-            prev.as_mut().with_node(|prev| {
+        match prev {
+            Some(mut prev) => prev.as_mut().with_node(|prev| {
                 debug_assert_eq!(prev.next, Some(ptr));
                 prev.next = next;
-            })
-        } else if self.head == Some(ptr) {
-            self.head = next;
+            }),
+            None => {
+                debug_assert_eq!(self.head, Some(ptr));
+                self.head = next;
+            }
         }
 
-        if let Some(mut next) = next {
-            next.as_mut().with_node(|next| {
+        match next {
+            Some(mut next) => next.as_mut().with_node(|next| {
                 debug_assert_eq!(next.prev, Some(ptr));
                 next.prev = prev;
-            });
-        } else if self.tail == Some(ptr) {
-            self.tail = prev;
-        };
+            }),
+            None => {
+                debug_assert_eq!(self.tail, Some(ptr));
+                self.tail = prev;
+            }
+        }
     }
 }
 
