@@ -182,9 +182,9 @@ aaaaaaaaaaaaaa";
                 b.to_async(rt).iter(|| async {
                     use futures::{channel::mpsc, sink::SinkExt, stream::StreamExt};
                     let (mut tx, mut rx) = mpsc::channel(100);
-                    task::spawn(async move {
-                        while let Ok(_) = tx.send(String::from(THE_STRING)).await {}
-                    });
+                    task::spawn(
+                        async move { while tx.send(String::from(THE_STRING)).await.is_ok() {} },
+                    );
                     for _ in 0..i {
                         let val = rx.next().await.unwrap();
                         criterion::black_box(&val);
@@ -212,7 +212,7 @@ aaaaaaaaaaaaaa";
                     // time ping-ponging through the scheduler than every other
                     // implementation.
                     tokio::task::unconstrained(async {
-                        use tokio::sync::mpsc::{self, error::TrySendError};
+                        use tokio::sync::mpsc;
                         let (tx, mut rx) = mpsc::channel(100);
                         task::spawn(tokio::task::unconstrained(async move {
                             // this actually brings Tokio's MPSC closer to what
@@ -242,9 +242,9 @@ aaaaaaaaaaaaaa";
                 b.to_async(rt).iter(|| async {
                     use async_std::channel;
                     let (tx, rx) = channel::bounded(100);
-                    task::spawn(async move {
-                        while let Ok(_) = tx.send(String::from(THE_STRING)).await {}
-                    });
+                    task::spawn(
+                        async move { while tx.send(String::from(THE_STRING)).await.is_ok() {} },
+                    );
                     for _ in 0..i {
                         let val = rx.recv().await.unwrap();
                         criterion::black_box(&val);

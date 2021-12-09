@@ -56,7 +56,7 @@ aaaaaaaaaaaaaa";
                     for _ in 0..senders {
                         let mut tx = tx.clone();
                         task::spawn(async move {
-                            while let Ok(_) = tx.send(String::from(THE_STRING)).await {}
+                            while tx.send(String::from(THE_STRING)).await.is_ok() {}
                         });
                     }
                     for _ in 0..SIZE {
@@ -122,7 +122,7 @@ aaaaaaaaaaaaaa";
                     for _ in 0..senders {
                         let tx = tx.clone();
                         task::spawn(async move {
-                            while let Ok(_) = tx.send(String::from(THE_STRING)).await {}
+                            while tx.send(String::from(THE_STRING)).await.is_ok() {}
                         });
                     }
                     for _ in 0..SIZE {
@@ -176,7 +176,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
                     let (tx, mut rx) = mpsc::channel(100);
                     for i in 0..senders {
                         let mut tx = tx.clone();
-                        task::spawn(async move { while let Ok(_) = tx.send(i).await {} });
+                        task::spawn(async move { while tx.send(i).await.is_ok() {} });
                     }
                     for _ in 0..SIZE {
                         let val = rx.next().await.unwrap();
@@ -210,7 +210,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
                         for i in 0..senders {
                             let tx = tx.clone();
                             task::spawn(tokio::task::unconstrained(async move {
-                                while let Ok(_) = tx.send(i).await {}
+                                while tx.send(i).await.is_ok() {}
                             }));
                         }
                         for _ in 0..SIZE {
@@ -233,7 +233,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
 
                     for i in 0..senders {
                         let tx = tx.clone();
-                        task::spawn(async move { while let Ok(_) = tx.send(i).await {} });
+                        task::spawn(async move { while tx.send(i).await.is_ok() {} });
                     }
                     for _ in 0..SIZE {
                         let val = rx.recv().await.unwrap();

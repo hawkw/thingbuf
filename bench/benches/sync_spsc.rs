@@ -130,10 +130,10 @@ aaaaaaaaaaaaaa";
         #[cfg(feature = "std-sync")]
         group.bench_with_input(BenchmarkId::new("std::sync::mpsc", size), &size, |b, &i| {
             b.iter(|| {
-                use std::sync::mpsc::{self, TrySendError};
+                use std::sync::mpsc;
                 let (tx, rx) = mpsc::sync_channel(100);
                 let producer =
-                    thread::spawn(move || while let Ok(_) = tx.send(String::from(THE_STRING)) {});
+                    thread::spawn(move || while tx.send(String::from(THE_STRING)).is_ok() {});
                 for _ in 0..i {
                     let val = rx.recv().unwrap();
                     criterion::black_box(&val);
@@ -149,13 +149,11 @@ aaaaaaaaaaaaaa";
             &size,
             |b, &i| {
                 b.iter(|| {
-                    use crossbeam::channel::{self, TrySendError};
+                    use crossbeam::channel;
                     let (tx, rx) = channel::bounded(100);
 
                     let producer =
-                        thread::spawn(
-                            move || while let Ok(_) = tx.send(String::from(THE_STRING)) {},
-                        );
+                        thread::spawn(move || while tx.send(String::from(THE_STRING)).is_ok() {});
 
                     for _ in 0..i {
                         let val = rx.recv().unwrap();
