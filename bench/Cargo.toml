@@ -18,7 +18,7 @@ thingbuf = { path = ".." }
 criterion = { version = "0.3.5", features = ["async_tokio"] }
 
 # for comparison benchmarks
-tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "sync"] }
 crossbeam = { version = "0.8.1", optional = true }
 async-std = { version = "1", optional = true }
 futures = { version = "0.3", optional = true }

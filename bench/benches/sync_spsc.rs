@@ -24,13 +24,13 @@ aaaaaaaaaaaaaa";
                     mpsc::{sync, TrySendError},
                     ThingBuf,
                 };
-                let (tx, rx) = sync::channel(ThingBuf::new(100));
+                let (tx, rx) = sync::channel(ThingBuf::<String>::new(100));
                 let producer = thread::spawn(move || loop {
                     match tx.try_send_ref() {
-                        Ok(mut r) => r.with_mut(|s: &mut String| {
-                            s.clear();
-                            s.push_str(THE_STRING)
-                        }),
+                        Ok(mut slot) => {
+                            slot.clear();
+                            slot.push_str(THE_STRING)
+                        }
                         Err(TrySendError::Closed(_)) => break,
                         _ => thread::yield_now(),
                     }
@@ -108,18 +108,12 @@ aaaaaaaaaaaaaa";
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             b.iter(|| {
-                use thingbuf::{
-                    mpsc::{sync, TrySendError},
-                    ThingBuf,
-                };
-                let (tx, rx) = sync::channel(ThingBuf::new(100));
-                let producer = thread::spawn(move || loop {
-                    match tx.send_ref() {
-                        Ok(mut slot) => {
-                            slot.clear();
-                            slot.push_str(THE_STRING);
-                        }
-                        Err(TrySendError::Closed(_)) => break,
+                use thingbuf::{mpsc::sync, ThingBuf};
+                let (tx, rx) = sync::channel(ThingBuf::<String>::new(100));
+                let producer = thread::spawn(move || {
+                    while let Ok(mut slot) = tx.send_ref() {
+                        slot.clear();
+                        slot.push_str(THE_STRING);
                     }
                 });
                 for _ in 0..i {
@@ -138,12 +132,8 @@ aaaaaaaaaaaaaa";
             b.iter(|| {
                 use std::sync::mpsc::{self, TrySendError};
                 let (tx, rx) = mpsc::sync_channel(100);
-                let producer = thread::spawn(move || loop {
-                    match tx.send(String::from(THE_STRING)) {
-                        Ok(()) => {}
-                        Err(_) => break,
-                    }
-                });
+                let producer =
+                    thread::spawn(move || while let Ok(_) = tx.send(String::from(THE_STRING)) {});
                 for _ in 0..i {
                     let val = rx.recv().unwrap();
                     criterion::black_box(&val);
@@ -162,13 +152,10 @@ aaaaaaaaaaaaaa";
                     use crossbeam::channel::{self, TrySendError};
                     let (tx, rx) = channel::bounded(100);
 
-                    let producer = thread::spawn(move || loop {
-                        match tx.send(String::from(THE_STRING)) {
-                            Ok(()) => {}
-                            Err(TrySendError::Disconnected(_)) => break,
-                            Err(_) => break,
-                        }
-                    });
+                    let producer =
+                        thread::spawn(
+                            move || while let Ok(_) = tx.send(String::from(THE_STRING)) {},
+                        );
 
                     for _ in 0..i {
                         let val = rx.recv().unwrap();

@@ -30,14 +30,9 @@ aaaaaaaaaaaaaa";
                     for _ in 0..senders {
                         let tx = tx.clone();
                         task::spawn(async move {
-                            loop {
-                                match tx.send_ref().await {
-                                    Ok(mut slot) => {
-                                        slot.clear();
-                                        slot.push_str(THE_STRING);
-                                    }
-                                    Err(_) => break,
-                                }
+                            while let Ok(mut slot) = tx.send_ref().await {
+                                slot.clear();
+                                slot.push_str(THE_STRING);
                             }
                         });
                     }
@@ -61,12 +56,7 @@ aaaaaaaaaaaaaa";
                     for _ in 0..senders {
                         let mut tx = tx.clone();
                         task::spawn(async move {
-                            loop {
-                                match tx.send(String::from(THE_STRING)).await {
-                                    Ok(_) => {}
-                                    Err(_) => break,
-                                }
-                            }
+                            while let Ok(_) = tx.send(String::from(THE_STRING)).await {}
                         });
                     }
                     for _ in 0..SIZE {
@@ -101,16 +91,13 @@ aaaaaaaaaaaaaa";
                         for _ in 0..senders {
                             let tx = tx.clone();
                             task::spawn(tokio::task::unconstrained(async move {
-                                loop {
-                                    // this actually brings Tokio's MPSC closer to what
-                                    // `ThingBuf` can do than all the other impls --- we
-                                    // only allocate if we _were_ able to reserve send
-                                    // capacity. but, we will still allocate and
-                                    // deallocate a string for every message...
-                                    match tx.reserve().await {
-                                        Ok(permit) => permit.send(String::from(THE_STRING)),
-                                        Err(_) => break,
-                                    }
+                                // this actually brings Tokio's MPSC closer to what
+                                // `ThingBuf` can do than all the other impls --- we
+                                // only allocate if we _were_ able to reserve send
+                                // capacity. but, we will still allocate and
+                                // deallocate a string for every message...
+                                while let Ok(permit) = tx.reserve().await {
+                                    permit.send(String::from(THE_STRING));
                                 }
                             }));
                         }
@@ -135,12 +122,7 @@ aaaaaaaaaaaaaa";
                     for _ in 0..senders {
                         let tx = tx.clone();
                         task::spawn(async move {
-                            loop {
-                                match tx.send(String::from(THE_STRING)).await {
-                                    Ok(_) => {}
-                                    Err(_) => break,
-                                }
-                            }
+                            while let Ok(_) = tx.send(String::from(THE_STRING)).await {}
                         });
                     }
                     for _ in 0..SIZE {
@@ -170,13 +152,8 @@ fn bench_mpsc_integer(c: &mut Criterion) {
                     for i in 0..senders {
                         let tx = tx.clone();
                         task::spawn(async move {
-                            loop {
-                                match tx.send_ref().await {
-                                    Ok(mut slot) => {
-                                        *slot = i;
-                                    }
-                                    Err(_) => break,
-                                }
+                            while let Ok(mut slot) = tx.send_ref().await {
+                                *slot = i;
                             }
                         });
                     }
@@ -199,14 +176,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
                     let (tx, mut rx) = mpsc::channel(100);
                     for i in 0..senders {
                         let mut tx = tx.clone();
-                        task::spawn(async move {
-                            loop {
-                                match tx.send(i).await {
-                                    Ok(_) => {}
-                                    Err(_) => break,
-                                }
-                            }
-                        });
+                        task::spawn(async move { while let Ok(_) = tx.send(i).await {} });
                     }
                     for _ in 0..SIZE {
                         let val = rx.next().await.unwrap();
@@ -240,17 +210,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
                         for i in 0..senders {
                             let tx = tx.clone();
                             task::spawn(tokio::task::unconstrained(async move {
-                                loop {
-                                    // this actually brings Tokio's MPSC closer to what
-                                    // `ThingBuf` can do than all the other impls --- we
-                                    // only allocate if we _were_ able to reserve send
-                                    // capacity. but, we will still allocate and
-                                    // deallocate a string for every message...
-                                    match tx.send(i).await {
-                                        Ok(_) => {}
-                                        Err(_) => break,
-                                    }
-                                }
+                                while let Ok(_) = tx.send(i).await {}
                             }));
                         }
                         for _ in 0..SIZE {
@@ -273,14 +233,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
 
                     for i in 0..senders {
                         let tx = tx.clone();
-                        task::spawn(async move {
-                            loop {
-                                match tx.send(i).await {
-                                    Ok(_) => {}
-                                    Err(_) => break,
-                                }
-                            }
-                        });
+                        task::spawn(async move { while let Ok(_) = tx.send(i).await {} });
                     }
                     for _ in 0..SIZE {
                         let val = rx.recv().await.unwrap();
