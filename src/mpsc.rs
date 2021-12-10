@@ -139,7 +139,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
             let pushed_waiter = self.tx_wait.push_waiter(&mut node, &mut register);
 
             match test_dbg!(pushed_waiter) {
-                WaitResult::TxClosed => {
+                WaitResult::Closed => {
                     // the channel closed while we were registering the waiter!
                     return Poll::Ready(Err(Closed(())));
                 }
@@ -189,7 +189,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
                     try_poll_recv!();
                     return Poll::Pending;
                 }
-                WaitResult::TxClosed => {
+                WaitResult::Closed => {
                     // the channel is closed (all the receivers are dropped).
                     // however, there may be messages left in the queue. try
                     // popping from the queue until it's empty.
