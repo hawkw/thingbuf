@@ -1,6 +1,6 @@
 use crate::{
     loom::{
-        atomic::{AtomicUsize, Ordering::*},
+        atomic::{AtomicBool, AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
     util::{mutex::Mutex, CachePadded},
@@ -86,6 +86,7 @@ pub(crate) struct WaitQueue<T> {
 #[derive(Debug)]
 pub(crate) struct Waiter<T> {
     node: UnsafeCell<Node<T>>,
+    pub(crate) was_woken_from_queue: AtomicBool,
 }
 
 #[derive(Debug)]
@@ -216,6 +217,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 };
                 if test_dbg!(should_queue) {
                     test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);
+                    test_dbg!(waiter.was_woken_from_queue.swap(false, AcqRel));
                     list.push_front(waiter);
                 }
             } else {
@@ -269,11 +271,13 @@ impl<T: Notify> Waiter<T> {
                 waiter: None,
                 _pin: PhantomPinned,
             }),
+            was_woken_from_queue: AtomicBool::new(false),
         }
     }
 
     #[inline]
     fn notify(self: Pin<&mut Self>) -> bool {
+        test_dbg!(self.was_woken_from_queue.swap(true, AcqRel));
         let waker = unsafe { self.with_node(|node| node.waiter.take()) };
         // Wake *outside* of the `with_node` closure, in case waking the
         // thread/task results in it immediately trying to access its node, and
@@ -382,26 +386,22 @@ impl<T> List<T> {
         let next = node_ref.take_next();
         let ptr = NonNull::from(node_ref);
 
-        match prev {
-            Some(mut prev) => prev.as_mut().with_node(|prev| {
+        if let Some(mut prev) = prev {
+            prev.as_mut().with_node(|prev| {
                 debug_assert_eq!(prev.next, Some(ptr));
                 prev.next = next;
-            }),
-            None => {
-                debug_assert_eq!(self.head, Some(ptr));
-                self.head = next;
-            }
+            });
+        } else if self.head == Some(ptr) {
+            self.head = next;
         }
 
-        match next {
-            Some(mut next) => next.as_mut().with_node(|next| {
+        if let Some(mut next) = next {
+            next.as_mut().with_node(|next| {
                 debug_assert_eq!(next.prev, Some(ptr));
                 next.prev = prev;
-            }),
-            None => {
-                debug_assert_eq!(self.tail, Some(ptr));
-                self.tail = prev;
-            }
+            });
+        } else if self.tail == Some(ptr) {
+            self.tail = prev;
         }
     }
 }

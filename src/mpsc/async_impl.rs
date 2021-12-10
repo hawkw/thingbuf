@@ -88,11 +88,9 @@ impl<T: Default> Sender<T> {
             fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 test_println!("SendRefFuture::poll({:p})", self);
                 // perform one send ref loop iteration
-
-                let this = self.as_mut().project();
-                this.tx
-                    .inner
-                    .poll_send_ref(this.waiter, |waker| {
+                let res = {
+                    let this = self.as_mut().project();
+                    this.tx.inner.poll_send_ref(this.waiter, |waker| {
                         let my_waker = cx.waker();
 
                         // If there's already a waker in the node, we might have
@@ -117,10 +115,28 @@ impl<T: Default> Sender<T> {
                         *waker = Some(my_waker.clone());
                         *this.queued = true;
                     })
-                    .map(|ready| {
-                        *this.queued = false;
-                        ready.map(SendRef)
-                    })
+                };
+                res.map(|ready| {
+                    let this = self.as_mut().project();
+                    if test_dbg!(*this.queued) {
+                        // If the node was ever in the queue, we have to make
+                        // sure we're *absolutely certain* it isn't still in the
+                        // queue before we say it's okay to drop the node
+                        // without removing it from the linked list. Check to
+                        // make sure we were woken by the queue, and not by a
+                        // spurious wakeup.
+                        //
+                        // This means we *may* be a little bit aggressive about
+                        // locking the wait queue to make sure the node is
+                        // removed, but that's better than leaving dangling
+                        // pointers in the queue...
+                        *this.queued = test_dbg!(!this
+                            .waiter
+                            .was_woken_from_queue
+                            .swap(false, Ordering::AcqRel));
+                    }
+                    ready.map(SendRef)
+                })
             }
         }
 
