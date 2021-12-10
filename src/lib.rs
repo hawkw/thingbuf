@@ -1,3 +1,4 @@
+#![cfg_attr(docsrs, doc = include_str!("../README.md"))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 use core::{cmp, fmt, mem::MaybeUninit, ops};
@@ -41,6 +42,19 @@ pub struct Ref<'slot, T> {
 
 pub struct Full<T = ()>(T);
 
+/// State variables for the atomic ring buffer algorithm.
+///
+/// This is separated from the actual storage array used to implement the ring
+/// buffer, so that it can be used by both the dynamically-sized implementation
+/// (`Box<[Slot<T>>]`) and the statically-sized (`[T; const usize]`)
+/// implementation.
+///
+/// A `Core`, when provided with a reference to the storage array, knows how to
+/// actually perform the ring buffer operations on that array.
+///
+/// The atomic ring buffer is based on the [MPMC bounded queue from 1024cores][1].
+///
+/// [1]: https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
 #[derive(Debug)]
 struct Core {
     head: CachePadded<AtomicUsize>,

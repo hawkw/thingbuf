@@ -64,7 +64,7 @@ impl<T: Notify> WaitCell<T> {
         match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING, Acquire)) {
             // someone else is notifying the receiver, so don't park!
             Err(actual) if test_dbg!(actual.contains(State::TX_CLOSED)) => {
-                return WaitResult::TxClosed;
+                return WaitResult::Closed;
             }
             Err(actual) if test_dbg!(actual.contains(State::NOTIFYING)) => {
                 f().notify();
@@ -125,7 +125,7 @@ impl<T: Notify> WaitCell<T> {
                 }
 
                 if test_dbg!(state.contains(State::TX_CLOSED)) {
-                    WaitResult::TxClosed
+                    WaitResult::Closed
                 } else {
                     WaitResult::Notified
                 }
@@ -288,7 +288,7 @@ mod tests {
                 return Poll::Ready(());
             }
 
-            if res == WaitResult::Notified || res == WaitResult::TxClosed {
+            if res == WaitResult::Notified || res == WaitResult::Closed {
                 return Poll::Ready(());
             }
 
