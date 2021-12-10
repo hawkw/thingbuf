@@ -94,6 +94,7 @@ struct Node<T> {
     next: Link<Waiter<T>>,
     prev: Link<Waiter<T>>,
     waiter: Option<T>,
+    is_notified: bool,
 
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
@@ -196,7 +197,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             if let Some(waiter) = waiter.take() {
                 // Now that we have the lock, register the `Waker` or `Thread`
                 // to
-                let should_queue = unsafe {
+                let (should_queue, is_notified) = unsafe {
                     test_println!("WaitQueue::push_waiter -> registering {:p}", waiter);
                     // Safety: the waker can only be registered while holding
                     // the wait queue lock. We are holding the lock, so no one
@@ -209,11 +210,20 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                         // the first time, or it is re-registering after a
                         // notification that it wasn't able to consume (for some
                         // reason).
-                        let should_queue = node.waiter.is_none();
+                        if test_dbg!(node.is_notified) {
+                            return (false, true);
+                        }
+
+                        let should_queue = test_dbg!(node.waiter.is_none());
                         register(&mut node.waiter);
-                        should_queue
+                        (should_queue, false)
                     })
                 };
+
+                if test_dbg!(is_notified) {
+                    return WaitResult::Notified;
+                }
+
                 if test_dbg!(should_queue) {
                     test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);
                     list.push_front(waiter);
@@ -267,6 +277,7 @@ impl<T: Notify> Waiter<T> {
                 next: None,
                 prev: None,
                 waiter: None,
+                is_notified: false,
                 _pin: PhantomPinned,
             }),
         }
@@ -274,7 +285,12 @@ impl<T: Notify> Waiter<T> {
 
     #[inline]
     fn notify(self: Pin<&mut Self>) -> bool {
-        let waker = unsafe { self.with_node(|node| node.waiter.take()) };
+        let waker = unsafe {
+            self.with_node(|node| {
+                node.is_notified = true;
+                node.waiter.take()
+            })
+        };
         // Wake *outside* of the `with_node` closure, in case waking the
         // thread/task results in it immediately trying to access its node, and
         // loom doesn't realize that we're done accessing the shared state.
