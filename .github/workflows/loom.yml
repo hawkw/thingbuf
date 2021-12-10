@@ -20,7 +20,7 @@ env:
 
 jobs:
   loom_mpsc_send_recv_wrap:
-    name: "mpsc"
+    name: "mpsc_send_recv_wrap"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -38,7 +38,7 @@ jobs:
           args: --profile loom --lib -- mpsc_send_recv_wrap
 
   loom_mpsc_try_send_recv:
-    name: "mpsc"
+    name: "mpsc_try_send_recv"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
