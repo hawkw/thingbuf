@@ -260,6 +260,75 @@ impl<'a, T: Default> Future for RecvFuture<'a, T> {
     }
 }
 
+feature! {
+    #![feature = "futures"]
+
+    /// A [`Stream`] that moves items out of a [`Receiver`] by value.
+    ///
+    /// Unlike the [`Stream`] implementation for `&'a Receiver<T>`, this yields
+    /// items *by value*, moving them out of the ring buffer. This means that
+    /// using `Items` prevents allocations stored in the channel from being
+    /// reused. However, it can be used when the items in the stream are not
+    /// reusable allocations.
+    #[must_use = "streams do nothing unless polled"]
+    pub struct Items<'a, T>(&'a Receiver<T>);
+
+    impl<'a, T: Default> futures_core::stream::Stream for &'a Receiver<T> {
+        type Item = RecvRef<'a, T>;
+
+        #[inline]
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.as_mut().poll_recv_ref(cx)
+        }
+    }
+
+    impl<'a, T: Default> futures_core::stream::Stream for Items<'a, T> {
+        type Item = T;
+
+        #[inline]
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.as_mut().0.poll_recv(cx)
+        }
+    }
+
+    impl<T: Default> Receiver<T> {
+        /// Returns a [`Stream`] that moves items out of a [`Receiver`] by value.
+        ///
+        /// Unlike the [`Stream`] implementation for `&'a Receiver<T>`, this yields
+        /// items *by value*, moving them out of the ring buffer. This means that
+        /// using `Items` prevents allocations stored in the channel from being
+        /// reused. However, it can be used when the items in the stream are not
+        /// reusable allocations.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use futures::stream::Stream;
+        /// use thingbuf::{ThingBuf, mpsc};
+        ///
+        /// # async fn doc() {
+        /// // Some function that's generic over a `Stream`.
+        /// async fn takes_a_stream<T: Stream<Item = usize>>(stream: T) {
+        ///     # drop(stream);
+        ///     // ...
+        /// }
+        ///
+        /// let (tx, rx) = mpsc::channel(ThingBuf::new(1024));
+        ///
+        /// // Convert the receiver into a stream of its items, and pass
+        /// // it to the `async fn`.
+        /// takes_a_stream(rx.items()).await;
+        ///
+        /// // ...
+        /// # drop(tx);
+        /// # }
+        /// ```
+        pub fn items(&self) -> Items<'_, T> {
+            Items(self)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
