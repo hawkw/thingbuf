@@ -1,3 +1,7 @@
+## Is it fast?
+
+![Yes, it's fast](https://raw.githubusercontent.com/hawkw/thingbuf/main/assets/async_mpsc_integer/lines.svg)
+
 ## FAQs
 
 - **Q: Why did you make this?**
