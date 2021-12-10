@@ -122,7 +122,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     pub(crate) fn wait(
         &self,
         waiter: &mut Option<Pin<&mut Waiter<T>>>,
-        register: impl FnOnce(&mut Option<T>) -> bool,
+        register: impl FnOnce(&mut Option<T>),
     ) -> WaitResult {
         test_println!("WaitQueue::push_waiter()");
 
@@ -201,7 +201,18 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     // Safety: the waker can only be registered while holding
                     // the wait queue lock. We are holding the lock, so no one
                     // else will try to touch the waker until we're done.
-                    waiter.with_node(|node| register(&mut node.waiter))
+                    waiter.with_node(|node| {
+                        // Does the node need to be added to the wait queue? If
+                        // it currently has a waiter (prior to registering),
+                        // then we know it's already in the queue. Otherwise, if
+                        // it doesn't have a waiter, it is either waiting for
+                        // the first time, or it is re-registering after a
+                        // notification that it wasn't able to consume (for some
+                        // reason).
+                        let should_queue = node.waiter.is_none();
+                        register(&mut node.waiter);
+                        should_queue
+                    })
                 };
                 if test_dbg!(should_queue) {
                     test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);

@@ -94,6 +94,12 @@ impl<T: Default> Sender<T> {
                     .inner
                     .poll_send_ref(this.waiter, |waker| {
                         let my_waker = cx.waker();
+
+                        // If there's already a waker in the node, we might have
+                        // been woken spuriously for some reason. In that case,
+                        // make sure that the waker in the node will wake the
+                        // waker that was passed in on *this* poll --- the
+                        // future may have moved to another task or something!
                         if let Some(waker) = waker.as_mut() {
                             if test_dbg!(!waker.will_wake(my_waker)) {
                                 test_println!(
@@ -102,16 +108,14 @@ impl<T: Default> Sender<T> {
                                 );
                                 *waker = my_waker.clone();
                             }
-                            false
-                        } else {
-                            test_println!(
-                                "poll_send_ref -> registering initial waker {:?}",
-                                my_waker
-                            );
-                            *waker = Some(my_waker.clone());
-                            *this.queued = true;
-                            true
+                            return;
                         }
+
+                        // Otherwise, we are registering this task for the first
+                        // time.
+                        test_println!("poll_send_ref -> registering initial waker {:?}", my_waker);
+                        *waker = Some(my_waker.clone());
+                        *this.queued = true;
                     })
                     .map(|ready| {
                         *this.queued = false;

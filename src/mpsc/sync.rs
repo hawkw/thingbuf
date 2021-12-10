@@ -70,9 +70,6 @@ impl<T: Default> Sender<T> {
                     let current = thread::current();
                     test_println!("registering {:?}", current);
                     *thread = Some(current);
-                    true
-                } else {
-                    false
                 }
             }) {
                 return result.map(SendRef);

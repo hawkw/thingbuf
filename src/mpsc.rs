@@ -121,7 +121,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
     fn poll_send_ref(
         &self,
         node: Pin<&mut queue::Waiter<N>>,
-        mut register: impl FnMut(&mut Option<N>) -> bool,
+        mut register: impl FnMut(&mut Option<N>),
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
         let mut backoff = Backoff::new();
         let mut node = Some(node);
