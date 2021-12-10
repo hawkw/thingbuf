@@ -238,7 +238,8 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     /// notification was assigned to the queue, returns `false`.
     pub(crate) fn notify(&self) -> bool {
         test_println!("WaitQueue::notify()");
-        if let Some(node) = self.pop_back() {
+        let node = { self.list.lock().pop_back() };
+        if let Some(node) = node {
             test_println!("notifying {:?}", node);
             node.notify();
             true
@@ -254,16 +255,9 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         test_println!("WaitQueue::close()");
         test_dbg!(self.state.fetch_or(CLOSED, Release));
         let mut list = self.list.lock();
-        while let Some(mut node) = list.pop_back() {
-            let node = unsafe { Pin::new_unchecked(node.as_mut()) };
+        while let Some(node) = list.pop_back() {
             node.notify();
         }
-    }
-
-    #[inline]
-    fn pop_back(&self) -> Option<Pin<&mut Waiter<T>>> {
-        let mut node = self.list.lock().pop_back()?;
-        Some(unsafe { Pin::new_unchecked(node.as_mut()) })
     }
 }
 
@@ -279,21 +273,6 @@ impl<T: Notify> Waiter<T> {
                 _pin: PhantomPinned,
             }),
             was_woken_from_queue: AtomicBool::new(false),
-        }
-    }
-
-    #[inline]
-    fn notify(self: Pin<&mut Self>) -> bool {
-        test_dbg!(self.was_woken_from_queue.swap(true, AcqRel));
-        let waker = unsafe { self.with_node(|node| node.waiter.take()) };
-        // Wake *outside* of the `with_node` closure, in case waking the
-        // thread/task results in it immediately trying to access its node, and
-        // loom doesn't realize that we're done accessing the shared state.
-        if let Some(waker) = waker {
-            waker.notify();
-            true
-        } else {
-            false
         }
     }
 }
@@ -365,7 +344,7 @@ impl<T> List<T> {
         }
     }
 
-    fn pop_back(&mut self) -> Option<NonNull<Waiter<T>>> {
+    fn pop_back(&mut self) -> Option<T> {
         let mut last = self.tail?;
         test_println!("List::pop_back() -> {:p}", last);
 
@@ -382,8 +361,9 @@ impl<T> List<T> {
 
             self.tail = prev;
             last.take_next();
+            last.was_woken_from_queue.store(true, Relaxed);
+            last.with_node(|node| node.waiter.take())
         }
-        Some(last)
     }
 
     unsafe fn remove(&mut self, node: Pin<&mut Waiter<T>>) {
