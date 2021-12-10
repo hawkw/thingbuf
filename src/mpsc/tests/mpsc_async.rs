@@ -5,6 +5,7 @@ use crate::{
 };
 
 #[test]
+#[cfg_attr(ci_skip_slow_models, ignore)]
 fn mpsc_try_send_recv() {
     loom::model(|| {
         let (tx, rx) = channel(ThingBuf::new(3));
@@ -169,6 +170,7 @@ fn spsc_send_recv_in_order_wrap() {
 }
 
 #[test]
+#[cfg_attr(ci_skip_slow_models, ignore)]
 fn mpsc_send_recv_wrap() {
     loom::model(|| {
         let (tx, rx) = channel(ThingBuf::<usize>::new(1));
