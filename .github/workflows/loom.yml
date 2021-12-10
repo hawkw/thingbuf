@@ -19,6 +19,42 @@ env:
   RUSTFLAGS: "--cfg loom"
 
 jobs:
+  loom_mpsc_send_recv_wrap:
+    name: "mpsc"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --profile loom --lib -- mpsc_send_recv_wrap
+
+  loom_mpsc_try_send_recv:
+    name: "mpsc"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --profile loom --lib -- mpsc_try_send_recv
+
   loom_mpsc_async:
     name: "mpsc"
     runs-on: ubuntu-latest
@@ -36,6 +72,7 @@ jobs:
         with:
           command: test
           args: --profile loom --lib -- mpsc_async
+          RUSTFLAGS: "--cfg loom --cfg ci_skip_slow_models"
 
   loom_mpsc_sync:
     name: "mpsc::sync"
