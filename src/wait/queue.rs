@@ -238,7 +238,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     /// notification was assigned to the queue, returns `false`.
     pub(crate) fn notify(&self) -> bool {
         test_println!("WaitQueue::notify()");
-        if let Some(node) = test_dbg!(self.list.lock().pop_back()) {
+        if let Some(node) = self.pop_back() {
             test_println!("notifying {:?}", node);
             node.notify();
             true
@@ -254,9 +254,16 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         test_println!("WaitQueue::close()");
         test_dbg!(self.state.fetch_or(CLOSED, Release));
         let mut list = self.list.lock();
-        while let Some(node) = list.pop_back() {
+        while let Some(mut node) = list.pop_back() {
+            let node = unsafe { Pin::new_unchecked(node.as_mut()) };
             node.notify();
         }
+    }
+
+    #[inline]
+    fn pop_back(&self) -> Option<Pin<&mut Waiter<T>>> {
+        let mut node = self.list.lock().pop_back()?;
+        Some(unsafe { Pin::new_unchecked(node.as_mut()) })
     }
 }
 
@@ -358,7 +365,7 @@ impl<T> List<T> {
         }
     }
 
-    fn pop_back(&mut self) -> Option<Pin<&mut Waiter<T>>> {
+    fn pop_back(&mut self) -> Option<NonNull<Waiter<T>>> {
         let mut last = self.tail?;
         test_println!("List::pop_back() -> {:p}", last);
 
@@ -375,9 +382,8 @@ impl<T> List<T> {
 
             self.tail = prev;
             last.take_next();
-
-            Some(Pin::new_unchecked(last))
         }
+        Some(last)
     }
 
     unsafe fn remove(&mut self, node: Pin<&mut Waiter<T>>) {
