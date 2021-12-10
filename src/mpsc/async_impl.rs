@@ -77,7 +77,7 @@ impl<T: Default> Sender<T> {
         #[pin_project::pin_project(PinnedDrop)]
         struct SendRefFuture<'sender, T> {
             tx: &'sender Sender<T>,
-            has_been_queued: bool,
+            queued: bool,
             #[pin]
             waiter: queue::Waiter<Waker>,
         }
@@ -90,38 +90,32 @@ impl<T: Default> Sender<T> {
                 // perform one send ref loop iteration
 
                 let this = self.as_mut().project();
-                let waiter = if test_dbg!(*this.has_been_queued) {
-                    None
-                } else {
-                    Some(this.waiter)
-                };
                 this.tx
                     .inner
-                    .poll_send_ref(waiter, |waker| {
-                        // if this is called, we are definitely getting queued.
-                        *this.has_been_queued = true;
-
-                        // if the wait node does not already have a waker, or the task
-                        // has been polled with a waker that won't wake the previous
-                        // one, register a new waker.
+                    .poll_send_ref(this.waiter, |waker| {
                         let my_waker = cx.waker();
-                        // do we need to re-register?
-                        let will_wake = waker
-                            .as_ref()
-                            .map(|waker| test_dbg!(waker.will_wake(my_waker)))
-                            .unwrap_or(false);
-
-                        if test_dbg!(will_wake) {
-                            return;
+                        if let Some(waker) = waker.as_mut() {
+                            if test_dbg!(!waker.will_wake(my_waker)) {
+                                test_println!(
+                                    "poll_send_ref -> re-registering waker {:?}",
+                                    my_waker
+                                );
+                                *waker = my_waker.clone();
+                            }
+                            false
+                        } else {
+                            test_println!(
+                                "poll_send_ref -> registering initial waker {:?}",
+                                my_waker
+                            );
+                            *waker = Some(my_waker.clone());
+                            *this.queued = true;
+                            true
                         }
-
-                        *waker = Some(my_waker.clone());
                     })
-                    .map(|ok| {
-                        // avoid having to lock the list to remove a node that's
-                        // definitely not queued.
-                        *this.has_been_queued = false;
-                        ok.map(SendRef)
+                    .map(|ready| {
+                        *this.queued = false;
+                        ready.map(SendRef)
                     })
             }
         }
@@ -130,7 +124,7 @@ impl<T: Default> Sender<T> {
         impl<T> PinnedDrop for SendRefFuture<'_, T> {
             fn drop(self: Pin<&mut Self>) {
                 test_println!("SendRefFuture::drop({:p})", self);
-                if test_dbg!(self.has_been_queued) {
+                if test_dbg!(self.queued) {
                     let this = self.project();
                     this.waiter.remove(&this.tx.inner.tx_wait)
                 }
@@ -139,7 +133,7 @@ impl<T: Default> Sender<T> {
 
         SendRefFuture {
             tx: self,
-            has_been_queued: false,
+            queued: false,
             waiter: queue::Waiter::new(),
         }
         .await

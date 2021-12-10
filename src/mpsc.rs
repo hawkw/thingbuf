@@ -120,10 +120,11 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
     /// may yield, or might park the thread.
     fn poll_send_ref(
         &self,
-        mut node: Option<Pin<&mut queue::Waiter<N>>>,
-        mut register: impl FnMut(&mut Option<N>),
+        node: Pin<&mut queue::Waiter<N>>,
+        mut register: impl FnMut(&mut Option<N>) -> bool,
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
         let mut backoff = Backoff::new();
+        let mut node = Some(node);
         // try to send a few times in a loop, in case the receiver notifies us
         // right before we park.
         loop {
@@ -136,7 +137,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
             }
 
             // try to push a waiter
-            let pushed_waiter = self.tx_wait.push_waiter(&mut node, &mut register);
+            let pushed_waiter = self.tx_wait.wait(&mut node, &mut register);
 
             match test_dbg!(pushed_waiter) {
                 WaitResult::Closed => {
@@ -187,6 +188,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
                     // just in case someone sent a message while we were
                     // registering the waiter.
                     try_poll_recv!();
+                    test_println!("-> yield");
                     return Poll::Pending;
                 }
                 WaitResult::Closed => {

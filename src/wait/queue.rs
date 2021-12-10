@@ -119,10 +119,10 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         }
     }
 
-    pub(crate) fn push_waiter(
+    pub(crate) fn wait(
         &self,
         waiter: &mut Option<Pin<&mut Waiter<T>>>,
-        register: impl FnOnce(&mut Option<T>),
+        register: impl FnOnce(&mut Option<T>) -> bool,
     ) -> WaitResult {
         test_println!("WaitQueue::push_waiter()");
 
@@ -194,17 +194,19 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             // to actually put the waiter in the linked list. wasn't that fun?
 
             if let Some(waiter) = waiter.take() {
-                test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);
-
                 // Now that we have the lock, register the `Waker` or `Thread`
                 // to
-                unsafe {
+                let should_queue = unsafe {
+                    test_println!("WaitQueue::push_waiter -> registering {:p}", waiter);
                     // Safety: the waker can only be registered while holding
                     // the wait queue lock. We are holding the lock, so no one
                     // else will try to touch the waker until we're done.
-                    waiter.with_node(|node| register(&mut node.waiter));
+                    waiter.with_node(|node| register(&mut node.waiter))
+                };
+                if test_dbg!(should_queue) {
+                    test_println!("WaitQueue::push_waiter -> pushing {:p}", waiter);
+                    list.push_front(waiter);
                 }
-                list.push_front(waiter);
             } else {
                 // XXX(eliza): in practice we can't ever get here because of the
                 // `if` above. this should probably be `unreachable_unchecked`
@@ -224,9 +226,11 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     pub(crate) fn notify(&self) -> bool {
         test_println!("WaitQueue::notify()");
         if let Some(node) = test_dbg!(self.list.lock().pop_back()) {
+            test_println!("notifying {:?}", node);
             node.notify();
             true
         } else {
+            test_println!("no waiters to notify...");
             test_dbg!(self.state.fetch_add(ONE_QUEUED, Release));
             false
         }
@@ -260,11 +264,15 @@ impl<T: Notify> Waiter<T> {
     #[inline]
     fn notify(self: Pin<&mut Self>) -> bool {
         let waker = unsafe { self.with_node(|node| node.waiter.take()) };
+        // Wake *outside* of the `with_node` closure, in case waking the
+        // thread/task results in it immediately trying to access its node, and
+        // loom doesn't realize that we're done accessing the shared state.
         if let Some(waker) = waker {
             waker.notify();
-            return true;
+            true
+        } else {
+            false
         }
-        false
     }
 }
 
