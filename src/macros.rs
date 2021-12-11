@@ -21,7 +21,7 @@ macro_rules! test_dbg {
     ($e:expr) => {
         match $e {
             e => {
-                #[cfg(test)]
+                #[cfg(any(test, all(thingbuf_trace, feature = "std")))]
                 test_println!("{} = {:?}", stringify!($e), &e);
                 e
             }

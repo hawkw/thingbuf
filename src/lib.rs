@@ -131,6 +131,7 @@ impl Core {
     }
 
     fn close(&self) -> bool {
+        test_println!("Core::close");
         if std::thread::panicking() {
             return false;
         }

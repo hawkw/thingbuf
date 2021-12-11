@@ -65,7 +65,7 @@ impl<T: Default> Sender<T> {
                 // be moved while this thread is parked.
                 Pin::new_unchecked(&mut waiter)
             };
-            if let Poll::Ready(result) = self.inner.poll_send_ref(Some(waiter), |thread| {
+            if let Poll::Ready(result) = self.inner.poll_send_ref(waiter, |thread| {
                 if thread.is_none() {
                     let current = thread::current();
                     test_println!("registering {:?}", current);
