@@ -128,7 +128,6 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         }
     }
 
-    #[inline(always)]
     pub(crate) fn start_wait(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
         test_println!("WaitQueue::start_wait");
         // optimistically, acquire a stored notification before trying to lock.
@@ -141,8 +140,6 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         self.start_wait_slow(node, waiter)
     }
 
-    #[cold]
-    #[inline(never)]
     fn start_wait_slow(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
         test_println!("WaitQueue::start_wait_slow");
         // There are no queued notifications to consume, and the queue is
@@ -234,7 +231,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     ///
     /// If a waiter was popped from the queue, returns `true`. Otherwise, if the
     /// notification was assigned to the queue, returns `false`.
-    #[inline(always)]
+    // #[inline(always)]
     pub(crate) fn notify(&self) -> bool {
         test_println!("WaitQueue::notify()");
         let mut state = test_dbg!(self.state.load(SeqCst));
@@ -254,8 +251,8 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         self.notify_slow(state)
     }
 
-    #[cold]
-    #[inline(always)]
+    // #[cold]
+    // #[inline(always)]
     fn notify_slow(&self, state: usize) -> bool {
         let mut list = self.list.lock();
         match state {
