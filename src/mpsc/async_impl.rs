@@ -95,9 +95,9 @@ impl<T: Default> Sender<T> {
             fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 test_println!("SendRefFuture::poll({:p})", self);
 
-                let this = self.as_mut().project();
-                let mut node = Some(this.waiter);
                 loop {
+                    let this = self.as_mut().project();
+                    let node = this.waiter;
                     match test_dbg!(*this.state) {
                         State::Start => {
                             match this.tx.try_send_ref() {
@@ -108,7 +108,7 @@ impl<T: Default> Sender<T> {
                                 Err(_) => {}
                             }
 
-                            let start_wait = this.tx.inner.tx_wait.start_wait(&mut node, || {
+                            let start_wait = this.tx.inner.tx_wait.start_wait(node, || {
                                 let waker = cx.waker().clone();
                                 test_println!("SendRefFuture::poll -> initial waker {:?}", waker);
                                 waker
@@ -130,9 +130,8 @@ impl<T: Default> Sender<T> {
                             }
                         }
                         State::Waiting => {
-                            let continue_wait = this.tx.inner.tx_wait.continue_wait(
-                                node.take().unwrap(),
-                                |waker| {
+                            let continue_wait =
+                                this.tx.inner.tx_wait.continue_wait(node, |waker| {
                                     let my_waker = cx.waker();
                                     if test_dbg!(!waker.will_wake(my_waker)) {
                                         test_println!(
@@ -141,8 +140,7 @@ impl<T: Default> Sender<T> {
                                         );
                                         *waker = my_waker.clone();
                                     }
-                                },
-                            );
+                                });
 
                             match test_dbg!(continue_wait) {
                                 WaitResult::Closed => {

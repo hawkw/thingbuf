@@ -131,7 +131,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     #[inline]
     pub(crate) fn start_wait(
         &self,
-        waiter: &mut Option<Pin<&mut Waiter<T>>>,
+        waiter: Pin<&mut Waiter<T>>,
         mk_waiter: impl FnOnce() -> T,
     ) -> WaitResult {
         test_println!("WaitQueue::start_wait");
@@ -148,7 +148,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     #[inline(never)]
     fn start_wait_slow(
         &self,
-        waiter: &mut Option<Pin<&mut Waiter<T>>>,
+        waiter: Pin<&mut Waiter<T>>,
         mk_waiter: impl FnOnce() -> T,
     ) -> WaitResult {
         test_println!("WaitQueue::start_wait_slow");
@@ -192,23 +192,19 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             }
         }
 
-        if let Some(waiter) = waiter.take() {
-            unsafe {
-                // Safety: we are holding the lock, and thus are allowed to mutate
-                // the node.
-                waiter.with_node(|node| {
-                    let _prev = node.waiter.replace(mk_waiter());
-                    debug_assert!(
-                        _prev.is_none(),
-                        "called `start_wait_slow` on a node that already had a waiter!"
-                    );
-                    debug_assert_eq!(node.woken, None);
-                });
-            }
-            list.push_front(waiter);
-        } else {
-            test_println!("-> waiter already queued");
+        unsafe {
+            // Safety: we are holding the lock, and thus are allowed to mutate
+            // the node.
+            waiter.with_node(|node| {
+                let _prev = node.waiter.replace(mk_waiter());
+                debug_assert!(
+                    _prev.is_none(),
+                    "called `start_wait_slow` on a node that already had a waiter!"
+                );
+                debug_assert_eq!(node.woken, None);
+            });
         }
+        list.push_front(waiter);
 
         WaitResult::Wait
     }
@@ -279,9 +275,10 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 false
             }
             WAITING => {
-                let node = list.pop_back().expect(
-                    "if we were in the `WAITING` state, there must be a waiter in the queue!",
-                );
+                let node = match list.pop_back() {
+                    Some(node) => node,
+                    None => unreachable!("if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}", self),
+                };
                 let waiter = unsafe {
                     // Safety: we are holding the lock, so it's okay to touch
                     // the node.
@@ -466,6 +463,13 @@ impl<T> List<T> {
     fn is_empty(&self) -> bool {
         self.head == None && self.tail == None
     }
+
+    // fn dump(&self) -> impl fmt::Debug
+    // where
+    //     T: Debug,
+    // {
+    //     struct DumpNode<'a, T: Debug>(Pin<&'a mut Waiter<T>>)
+    // }
 }
 
 impl<T> fmt::Debug for List<T> {
