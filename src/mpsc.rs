@@ -125,35 +125,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
         let mut backoff = Backoff::new();
         let mut node = Some(node);
-        // try to send a few times in a loop, in case the receiver notifies us
-        // right before we park.
-        loop {
-            // try to reserve a send slot, returning if we succeeded or if the
-            // queue was closed.
-            match self.try_send_ref() {
-                Ok(slot) => return Poll::Ready(Ok(slot)),
-                Err(TrySendError::Closed(_)) => return Poll::Ready(Err(Closed(()))),
-                Err(_) => {}
-            }
-
-            // try to push a waiter
-            let pushed_waiter = self.tx_wait.wait(&mut node, &mut register);
-
-            match test_dbg!(pushed_waiter) {
-                WaitResult::Closed => {
-                    // the channel closed while we were registering the waiter!
-                    return Poll::Ready(Err(Closed(())));
-                }
-                WaitResult::Wait => {
-                    // okay, we are now queued to wait. gotosleep!
-                    return Poll::Pending;
-                }
-                WaitResult::Notified => {
-                    // we consumed a queued notification. try again...
-                    backoff.spin_yield();
-                }
-            }
-        }
+        unimplemented!()
     }
 
     /// Performs one iteration of the `recv_ref` loop.

@@ -77,9 +77,16 @@ impl<T: Default> Sender<T> {
         #[pin_project::pin_project(PinnedDrop)]
         struct SendRefFuture<'sender, T> {
             tx: &'sender Sender<T>,
-            queued: bool,
+            state: State,
             #[pin]
             waiter: queue::Waiter<Waker>,
+        }
+
+        #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+        enum State {
+            Start,
+            Waiting,
+            Done,
         }
 
         impl<'sender, T: Default + 'sender> Future for SendRefFuture<'sender, T> {
@@ -87,56 +94,76 @@ impl<T: Default> Sender<T> {
 
             fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 test_println!("SendRefFuture::poll({:p})", self);
-                // perform one send ref loop iteration
-                let res = {
-                    let this = self.as_mut().project();
-                    this.tx.inner.poll_send_ref(this.waiter, |waker| {
-                        let my_waker = cx.waker();
 
-                        // If there's already a waker in the node, we might have
-                        // been woken spuriously for some reason. In that case,
-                        // make sure that the waker in the node will wake the
-                        // waker that was passed in on *this* poll --- the
-                        // future may have moved to another task or something!
-                        if let Some(waker) = waker.as_mut() {
-                            if test_dbg!(!waker.will_wake(my_waker)) {
-                                test_println!(
-                                    "poll_send_ref -> re-registering waker {:?}",
-                                    my_waker
-                                );
-                                *waker = my_waker.clone();
+                let this = self.as_mut().project();
+                let mut node = Some(this.waiter);
+                loop {
+                    match test_dbg!(*this.state) {
+                        State::Start => {
+                            match this.tx.try_send_ref() {
+                                Ok(slot) => return Poll::Ready(Ok(slot)),
+                                Err(TrySendError::Closed(_)) => {
+                                    return Poll::Ready(Err(Closed(())))
+                                }
+                                Err(_) => {}
                             }
-                            return;
-                        }
 
-                        // Otherwise, we are registering this task for the first
-                        // time.
-                        test_println!("poll_send_ref -> registering initial waker {:?}", my_waker);
-                        *waker = Some(my_waker.clone());
-                        *this.queued = true;
-                    })
-                };
-                res.map(|ready| {
-                    let this = self.as_mut().project();
-                    if test_dbg!(*this.queued) {
-                        // If the node was ever in the queue, we have to make
-                        // sure we're *absolutely certain* it isn't still in the
-                        // queue before we say it's okay to drop the node
-                        // without removing it from the linked list. Check to
-                        // make sure we were woken by the queue, and not by a
-                        // spurious wakeup.
-                        //
-                        // This means we *may* be a little bit aggressive about
-                        // locking the wait queue to make sure the node is
-                        // removed, but that's better than leaving dangling
-                        // pointers in the queue...
-                        *this.queued = test_dbg!(!this
-                            .waiter
-                            .was_woken_from_queue
-                            .swap(false, Ordering::AcqRel));
+                            let start_wait = this.tx.inner.tx_wait.start_wait(&mut node, || {
+                                let waker = cx.waker().clone();
+                                test_println!("SendRefFuture::poll -> initial waker {:?}", waker);
+                                waker
+                            });
+
+                            match test_dbg!(start_wait) {
+                                WaitResult::Closed => {
+                                    // the channel closed while we were registering the waiter!
+                                    *this.state = State::Done;
+                                    return Poll::Ready(Err(Closed(())));
+                                }
+                                WaitResult::Wait => {
+                                    // okay, we are now queued to wait.
+                                    // gotosleep!
+                                    *this.state = State::Waiting;
+                                    return Poll::Pending;
+                                }
+                                WaitResult::Notified => continue,
+                            }
+                        }
+                        State::Waiting => {
+                            let continue_wait = this.tx.inner.tx_wait.continue_wait(
+                                node.take().unwrap(),
+                                |waker| {
+                                    let my_waker = cx.waker();
+                                    if test_dbg!(!waker.will_wake(my_waker)) {
+                                        test_println!(
+                                            "poll_send_ref -> re-registering waker {:?}",
+                                            my_waker
+                                        );
+                                        *waker = my_waker.clone();
+                                    }
+                                },
+                            );
+
+                            match test_dbg!(continue_wait) {
+                                WaitResult::Closed => {
+                                    *this.state = State::Done;
+                                    return Poll::Ready(Err(Closed(())));
+                                }
+                                WaitResult::Wait => return Poll::Pending,
+                                WaitResult::Notified => {
+                                    *this.state = State::Done;
+                                }
+                            }
+                        }
+                        State::Done => match this.tx.try_send_ref() {
+                            Ok(slot) => return Poll::Ready(Ok(slot)),
+                            Err(TrySendError::Closed(_)) => return Poll::Ready(Err(Closed(()))),
+                            Err(_) => {
+                                *this.state = State::Start;
+                            }
+                        },
                     }
-                    ready.map(SendRef)
-                })
+                }
             }
         }
 
@@ -144,8 +171,8 @@ impl<T: Default> Sender<T> {
         impl<T> PinnedDrop for SendRefFuture<'_, T> {
             fn drop(self: Pin<&mut Self>) {
                 test_println!("SendRefFuture::drop({:p})", self);
-                if test_dbg!(self.queued) {
-                    let this = self.project();
+                let this = self.project();
+                if test_dbg!(*this.state) == State::Waiting {
                     this.waiter.remove(&this.tx.inner.tx_wait)
                 }
             }
@@ -153,7 +180,7 @@ impl<T: Default> Sender<T> {
 
         SendRefFuture {
             tx: self,
-            queued: false,
+            state: State::Start,
             waiter: queue::Waiter::new(),
         }
         .await
