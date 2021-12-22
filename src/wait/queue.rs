@@ -1,6 +1,6 @@
 use crate::{
     loom::{
-        atomic::{AtomicBool, AtomicUsize, Ordering::*},
+        atomic::{AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
     util::{mutex::Mutex, CachePadded},

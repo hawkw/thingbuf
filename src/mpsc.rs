@@ -12,7 +12,6 @@
 
 use crate::{
     loom::{atomic::AtomicUsize, hint},
-    util::Backoff,
     wait::{queue, Notify, WaitCell, WaitQueue, WaitResult},
     Ref, ThingBuf,
 };
@@ -120,11 +119,9 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
     /// may yield, or might park the thread.
     fn poll_send_ref(
         &self,
-        node: Pin<&mut queue::Waiter<N>>,
-        mut register: impl FnMut(&mut Option<N>),
+        _node: Pin<&mut queue::Waiter<N>>,
+        _register: impl FnMut(&mut Option<N>),
     ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
-        let mut backoff = Backoff::new();
-        let mut node = Some(node);
         unimplemented!()
     }
 
