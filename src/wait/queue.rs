@@ -205,6 +205,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     debug_assert_eq!(node.woken, None);
                 });
             }
+            list.push_front(waiter);
         } else {
             test_println!("-> waiter already queued");
         }
@@ -267,7 +268,6 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     }
 
     #[cold]
-    #[inline(never)]
     fn notify_slow(&self, state: usize) -> bool {
         let mut list = self.list.lock();
         match state {
@@ -276,7 +276,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     debug_assert!(actual == EMPTY || actual == WAKING);
                     self.state.store(WAKING, SeqCst);
                 }
-                return false;
+                false
             }
             WAITING => {
                 let node = list.pop_back().expect(
@@ -291,6 +291,13 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                         node.waiter.take()
                     })
                 };
+
+                // If we popped the last node, transition back to the empty
+                // state.
+                if test_dbg!(list.is_empty()) {
+                    self.state.store(EMPTY, SeqCst);
+                }
+
                 // drop the lock
                 drop(list);
 
@@ -366,7 +373,11 @@ impl<T: Notify> Waiter<T> {
             // *this* list. However, the potential callers of this method will
             // never have access to any other linked lists, so we can just kind
             // of assume that this is safe.
-            q.list.lock().remove(self);
+            let mut list = q.list.lock();
+            list.remove(self);
+            if test_dbg!(list.is_empty()) {
+                let _ = test_dbg!(q.state.compare_exchange(WAITING, EMPTY, SeqCst, SeqCst));
+            }
         }
     }
 }
@@ -450,6 +461,10 @@ impl<T> List<T> {
         } else if self.tail == Some(ptr) {
             self.tail = prev;
         }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.head == None && self.tail == None
     }
 }
 
