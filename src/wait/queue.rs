@@ -128,6 +128,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn start_wait(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
         test_println!("WaitQueue::start_wait");
         // optimistically, acquire a stored notification before trying to lock.
@@ -137,10 +138,6 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             _ => {}
         }
 
-        self.start_wait_slow(node, waiter)
-    }
-
-    fn start_wait_slow(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
         test_println!("WaitQueue::start_wait_slow");
         // There are no queued notifications to consume, and the queue is
         // still open. Therefore, it's time to actually push the waiter to
@@ -157,7 +154,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     if let Err(actual) =
                         test_dbg!(self.state.compare_exchange(EMPTY, WAITING, SeqCst, SeqCst))
                     {
-                        assert!(actual == WAKING || actual == CLOSED);
+                        debug_assert!(actual == WAKING || actual == CLOSED);
                         state = actual;
                     } else {
                         break;
@@ -170,7 +167,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     if let Err(actual) =
                         test_dbg!(self.state.compare_exchange(WAKING, EMPTY, SeqCst, SeqCst))
                     {
-                        assert!(actual == EMPTY || actual == CLOSED);
+                        debug_assert!(actual == EMPTY || actual == CLOSED);
                         state = actual;
                     } else {
                         // consumed wakeup!
@@ -199,6 +196,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         WaitResult::Wait
     }
 
+    #[inline(always)]
     pub(crate) fn continue_wait(&self, node: Pin<&mut Waiter<T>>, my_waiter: &T) -> WaitResult {
         test_println!("WaitQueue::continue_wait");
         // if we are in the waiting state, the node is already in the queue, so
@@ -237,10 +235,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         let mut state = test_dbg!(self.state.load(SeqCst));
 
         while state == WAKING || state == EMPTY {
-            match test_dbg!(self
-                .state
-                .compare_exchange_weak(state, WAKING, SeqCst, SeqCst))
-            {
+            match test_dbg!(self.state.compare_exchange(state, WAKING, SeqCst, SeqCst)) {
                 // No waiters are currently waiting, assign the notification to
                 // the queue to be consumed by the next wait attempt.
                 Ok(_) => return false,

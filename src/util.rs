@@ -28,7 +28,7 @@ impl Backoff {
         Self(0)
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn spin(&mut self) {
         #[cfg(not(all(loom, test)))]
         for _ in 0..test_dbg!(1 << self.0.min(Self::MAX_SPINS)) {
@@ -46,7 +46,7 @@ impl Backoff {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn spin_yield(&mut self) {
         if self.0 <= Self::MAX_SPINS || cfg!(not(any(feature = "std", test))) {
             #[cfg(not(all(loom, test)))]
