@@ -129,11 +129,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     }
 
     #[inline(always)]
-    pub(crate) fn start_wait(
-        &self,
-        waiter: Pin<&mut Waiter<T>>,
-        mk_waiter: impl FnOnce() -> T,
-    ) -> WaitResult {
+    pub(crate) fn start_wait(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
         test_println!("WaitQueue::start_wait");
         // optimistically, acquire a stored notification before trying to lock.
         match test_dbg!(self.state.compare_exchange(WAKING, EMPTY, SeqCst, SeqCst)) {
@@ -142,16 +138,12 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             _ => {}
         }
 
-        self.start_wait_slow(waiter, mk_waiter)
+        self.start_wait_slow(node, waiter)
     }
 
     #[cold]
     #[inline(never)]
-    fn start_wait_slow(
-        &self,
-        waiter: Pin<&mut Waiter<T>>,
-        mk_waiter: impl FnOnce() -> T,
-    ) -> WaitResult {
+    fn start_wait_slow(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
         test_println!("WaitQueue::start_wait_slow");
         // There are no queued notifications to consume, and the queue is
         // still open. Therefore, it's time to actually push the waiter to
@@ -196,8 +188,8 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         unsafe {
             // Safety: we are holding the lock, and thus are allowed to mutate
             // the node.
-            waiter.with_node(|node| {
-                let _prev = node.waiter.replace(mk_waiter());
+            node.with_node(|node| {
+                let _prev = node.waiter.replace(waiter.clone());
                 debug_assert!(
                     _prev.is_none(),
                     "called `start_wait_slow` on a node that already had a waiter!"
@@ -205,36 +197,34 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 debug_assert_eq!(node.woken, None);
             });
         }
-        list.push_front(waiter);
+        list.push_front(node);
 
         WaitResult::Wait
     }
 
-    pub(crate) fn continue_wait(
-        &self,
-        waiter: Pin<&mut Waiter<T>>,
-        register: impl FnOnce(&mut T),
-    ) -> WaitResult {
+    pub(crate) fn continue_wait(&self, node: Pin<&mut Waiter<T>>, my_waiter: &T) -> WaitResult {
         test_println!("WaitQueue::continue_wait");
         // if we are in the waiting state, the node is already in the queue, so
         // we *must* lock to access the waiter fields.
         let _list = self.list.lock();
         unsafe {
-            waiter.with_node(|node| {
+            node.with_node(|node| {
                 if let Some(woken) = node.woken.take() {
                     node.waiter = None;
-                    match woken {
+                    return match woken {
                         Wakeup::Closed => WaitResult::Closed,
                         Wakeup::Woken => WaitResult::Notified,
+                    };
+                }
+
+                if let Some(ref mut waiter) = node.waiter {
+                    if !waiter.same(my_waiter) {
+                        *waiter = my_waiter.clone();
                     }
                 } else {
-                    let waiter = node
-                        .waiter
-                        .as_mut()
-                        .expect("if `continue_wait` was called, the node must have a waiter");
-                    register(waiter);
-                    WaitResult::Wait
+                    node.waiter = Some(my_waiter.clone());
                 }
+                WaitResult::Wait
             })
         }
     }

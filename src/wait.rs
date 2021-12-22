@@ -54,21 +54,35 @@ pub(crate) enum WaitResult {
     Notified,
 }
 
-pub(crate) trait Notify: UnwindSafe + fmt::Debug {
+pub(crate) trait Notify: UnwindSafe + fmt::Debug + Clone {
     fn notify(self);
+
+    fn same(&self, other: &Self) -> bool;
 }
 
 #[cfg(feature = "std")]
 impl Notify for thread::Thread {
+    #[inline]
     fn notify(self) {
         test_println!("NOTIFYING {:?} (from {:?})", self, thread::current());
         self.unpark();
     }
+
+    #[inline]
+    fn same(&self, other: &Self) -> bool {
+        other.id() == self.id()
+    }
 }
 
 impl Notify for Waker {
+    #[inline]
     fn notify(self) {
         test_println!("WAKING TASK {:?} (from {:?})", self, thread::current());
         self.wake();
+    }
+
+    #[inline]
+    fn same(&self, other: &Self) -> bool {
+        other.will_wake(self)
     }
 }

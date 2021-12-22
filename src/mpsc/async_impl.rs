@@ -108,11 +108,7 @@ impl<T: Default> Sender<T> {
                                 Err(_) => {}
                             }
 
-                            let start_wait = this.tx.inner.tx_wait.start_wait(node, || {
-                                let waker = cx.waker().clone();
-                                test_println!("SendRefFuture::poll -> initial waker {:?}", waker);
-                                waker
-                            });
+                            let start_wait = this.tx.inner.tx_wait.start_wait(node, cx.waker());
 
                             match test_dbg!(start_wait) {
                                 WaitResult::Closed => {
@@ -131,16 +127,7 @@ impl<T: Default> Sender<T> {
                         }
                         State::Waiting => {
                             let continue_wait =
-                                this.tx.inner.tx_wait.continue_wait(node, |waker| {
-                                    let my_waker = cx.waker();
-                                    if test_dbg!(!waker.will_wake(my_waker)) {
-                                        test_println!(
-                                            "poll_send_ref -> re-registering waker {:?}",
-                                            my_waker
-                                        );
-                                        *waker = my_waker.clone();
-                                    }
-                                });
+                                this.tx.inner.tx_wait.continue_wait(node, cx.waker());
 
                             match test_dbg!(continue_wait) {
                                 WaitResult::Closed => {
