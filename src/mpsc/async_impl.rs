@@ -157,7 +157,7 @@ impl<T: Default> Sender<T> {
             fn drop(self: Pin<&mut Self>) {
                 test_println!("SendRefFuture::drop({:p})", self);
                 let this = self.project();
-                if test_dbg!(*this.state) == State::Waiting {
+                if test_dbg!(*this.state) == State::Waiting && test_dbg!(this.waiter.is_linked()) {
                     this.waiter.remove(&this.tx.inner.tx_wait)
                 }
             }
