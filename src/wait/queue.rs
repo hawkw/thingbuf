@@ -396,6 +396,7 @@ impl<T> Waiter<T> {
     /// # Safety
     ///
     /// This is only safe to call while the list is locked.
+    #[inline(always)]
     unsafe fn with_node<U>(&self, f: impl FnOnce(&mut Node<T>) -> U) -> U {
         self.node.with_mut(|node| f(&mut *node))
     }
