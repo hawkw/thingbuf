@@ -381,12 +381,12 @@ impl<T: Notify> Waiter<T> {
         self.with_node(|node| node.waiter.take())
     }
 
-    #[inline(never)]
+    #[inline(always)]
     fn swap_state(&self, new_state: WaiterState) -> WaiterState {
         self.state.swap(new_state as u8, AcqRel).into()
     }
 
-    #[inline(never)]
+    #[inline(always)]
     fn state(&self) -> WaiterState {
         self.state.load(Acquire).into()
     }
