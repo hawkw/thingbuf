@@ -37,7 +37,7 @@ lto = true
 opt-level = 3
 
 [patch.crates-io]
-loom = { git = "https://github.com/tokio-rs/loom", branch = "eliza/fix-double-panic-in-drop" }
+loom = { git = "https://github.com/tokio-rs/loom", rev = "555b52fdb267964f0950a52be87b0f28c40b054c" }
 
 [package.metadata.docs.rs]
 all-features = true
