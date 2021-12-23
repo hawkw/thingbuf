@@ -348,6 +348,7 @@ impl<T: Notify> Waiter<T> {
         }
     }
 
+    #[inline(never)]
     pub(crate) fn remove(self: Pin<&mut Self>, q: &WaitQueue<T>) {
         test_println!("Waiter::remove({:p})", self);
         unsafe {
@@ -364,6 +365,7 @@ impl<T: Notify> Waiter<T> {
         }
     }
 
+    #[inline]
     pub(crate) fn is_linked(&self) -> bool {
         test_dbg!(self.state.load(Acquire)) != WaiterState::Waiting as u8
     }
@@ -371,6 +373,7 @@ impl<T: Notify> Waiter<T> {
     /// # Safety
     ///
     /// This is only safe to call while the list is locked.
+    #[inline]
     unsafe fn take_waker(self: Pin<&mut Self>, new_state: WaiterState) -> Option<T> {
         test_println!("Waiter::take_waker({:p}, {:?})", self, new_state);
         let _prev_state = test_dbg!(self.swap_state(new_state));
@@ -378,10 +381,12 @@ impl<T: Notify> Waiter<T> {
         self.with_node(|node| node.waiter.take())
     }
 
+    #[inline(never)]
     fn swap_state(&self, new_state: WaiterState) -> WaiterState {
         self.state.swap(new_state as u8, AcqRel).into()
     }
 
+    #[inline(never)]
     fn state(&self) -> WaiterState {
         self.state.load(Acquire).into()
     }
