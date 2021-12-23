@@ -16,7 +16,8 @@ fn bench_mpsc_reusable(c: &mut Criterion) {
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
 aaaaaaaaaaaaaa";
 
-    const SIZE: u64 = 100;
+    const SIZE: u64 = 200;
+    const CAPACITY: usize = 50;
 
     for senders in [10, 50, 100] {
         group.bench_with_input(
@@ -25,7 +26,7 @@ aaaaaaaaaaaaaa";
             |b, &senders| {
                 b.to_async(rt()).iter(|| async {
                     use thingbuf::{mpsc, ThingBuf};
-                    let (tx, rx) = mpsc::channel(ThingBuf::<String>::new(100));
+                    let (tx, rx) = mpsc::channel(ThingBuf::<String>::new(CAPACITY));
                     for _ in 0..senders {
                         let tx = tx.clone();
                         task::spawn(async move {
@@ -51,7 +52,7 @@ aaaaaaaaaaaaaa";
             |b, &senders| {
                 b.to_async(rt()).iter(|| async {
                     use futures::{channel::mpsc, sink::SinkExt, stream::StreamExt};
-                    let (tx, mut rx) = mpsc::channel(100);
+                    let (tx, mut rx) = mpsc::channel(CAPACITY);
                     for _ in 0..senders {
                         let mut tx = tx.clone();
                         task::spawn(async move {
@@ -85,7 +86,7 @@ aaaaaaaaaaaaaa";
                     // implementation.
                     tokio::task::unconstrained(async {
                         use tokio::sync::mpsc;
-                        let (tx, mut rx) = mpsc::channel(100);
+                        let (tx, mut rx) = mpsc::channel(CAPACITY);
 
                         for _ in 0..senders {
                             let tx = tx.clone();
@@ -116,7 +117,7 @@ aaaaaaaaaaaaaa";
             |b, &senders| {
                 b.to_async(rt()).iter(|| async {
                     use async_std::channel;
-                    let (tx, rx) = channel::bounded(100);
+                    let (tx, rx) = channel::bounded(CAPACITY);
 
                     for _ in 0..senders {
                         let tx = tx.clone();
@@ -138,7 +139,10 @@ aaaaaaaaaaaaaa";
 
 fn bench_mpsc_integer(c: &mut Criterion) {
     let mut group = c.benchmark_group("async/mpsc_integer");
+
     const SIZE: u64 = 1_000;
+    const CAPACITY: usize = 100;
+
     for senders in [10, 50, 100] {
         group.bench_with_input(
             BenchmarkId::new("ThingBuf", senders),
@@ -146,7 +150,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             |b, &senders| {
                 b.to_async(rt()).iter(|| async {
                     use thingbuf::{mpsc, ThingBuf};
-                    let (tx, rx) = mpsc::channel(ThingBuf::new(100));
+                    let (tx, rx) = mpsc::channel(ThingBuf::new(CAPACITY));
                     for i in 0..senders {
                         let tx = tx.clone();
                         task::spawn(async move {
@@ -171,7 +175,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             |b, &senders| {
                 b.to_async(rt()).iter(|| async {
                     use futures::{channel::mpsc, sink::SinkExt, stream::StreamExt};
-                    let (tx, mut rx) = mpsc::channel(100);
+                    let (tx, mut rx) = mpsc::channel(CAPACITY);
                     for i in 0..senders {
                         let mut tx = tx.clone();
                         task::spawn(async move { while tx.send(i).await.is_ok() {} });
@@ -203,7 +207,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
                     // implementation.
                     tokio::task::unconstrained(async {
                         use tokio::sync::mpsc;
-                        let (tx, mut rx) = mpsc::channel(100);
+                        let (tx, mut rx) = mpsc::channel(CAPACITY);
 
                         for i in 0..senders {
                             let tx = tx.clone();
@@ -227,7 +231,7 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             |b, &senders| {
                 b.to_async(rt()).iter(|| async {
                     use async_std::channel;
-                    let (tx, rx) = channel::bounded(100);
+                    let (tx, rx) = channel::bounded(CAPACITY);
 
                     for i in 0..senders {
                         let tx = tx.clone();
