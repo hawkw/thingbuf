@@ -367,7 +367,7 @@ impl<T: Notify> Waiter<T> {
 
     #[inline]
     pub(crate) fn is_linked(&self) -> bool {
-        test_dbg!(self.state.load(Acquire)) != WaiterState::Waiting as u8
+        test_dbg!(self.state()) == WaiterState::Waiting
     }
 
     /// # Safety
