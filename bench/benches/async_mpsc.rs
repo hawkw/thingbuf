@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tokio::{runtime, task};
 
 /// This benchmark simulates sending a bunch of strings over a channel. It's
@@ -17,7 +17,6 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
 aaaaaaaaaaaaaa";
 
     const SIZE: u64 = 100;
-    group.throughput(Throughput::Elements(SIZE));
 
     for senders in [10, 50, 100] {
         group.bench_with_input(
@@ -141,7 +140,6 @@ fn bench_mpsc_integer(c: &mut Criterion) {
     let mut group = c.benchmark_group("async/mpsc_integer");
     const SIZE: u64 = 1_000;
     for senders in [10, 50, 100] {
-        group.throughput(Throughput::Elements(SIZE));
         group.bench_with_input(
             BenchmarkId::new("ThingBuf", senders),
             &senders,
