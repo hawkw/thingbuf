@@ -145,6 +145,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     }
 
     #[cold]
+    #[inline(never)]
     fn start_wait_slow(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
         test_println!("WaitQueue::start_wait_slow");
         // There are no queued notifications to consume, and the queue is
@@ -213,13 +214,19 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         match state {
             WaiterState::Woken => WaitResult::Notified,
             WaiterState::Closed => WaitResult::Closed,
-            WaiterState::Empty => {
-                unreachable!("waiter state should not be empty when calling `continue_wait`")
+            _state => {
+                debug_assert_eq!(
+                    _state,
+                    WaiterState::Waiting,
+                    "`continue_wait` should not be called while in empty state!"
+                );
+                self.continue_wait_slow(node, my_waiter)
             }
-            _ => self.continue_wait_slow(node, my_waiter),
         }
     }
 
+    #[cold]
+    #[inline(never)]
     fn continue_wait_slow(&self, node: Pin<&mut Waiter<T>>, my_waiter: &T) -> WaitResult {
         // if we are in the waiting state, the node is already in the queue, so
         // we *must* lock to access the waiter fields.
@@ -270,6 +277,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     }
 
     #[cold]
+    #[inline(never)]
     fn notify_slow(&self, state: usize) -> bool {
         let mut list = self.list.lock();
         match state {
