@@ -348,10 +348,8 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 false
             }
             State::Waiting => {
-                let waiter = match list.dequeue(State::Woken) {
-                    Some(waiter) => waiter,
-                    None => unreachable!("if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}", self),
-                };
+                let waiter = list.dequeue(State::Woken);
+                debug_assert!(waiter.is_some(), "if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}", self);
 
                 // If we popped the last node, transition back to the empty
                 // state.
@@ -362,11 +360,17 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 // drop the lock
                 drop(list);
 
-                waiter.notify();
-                true
+                // wake the waiter
+                if let Some(waiter) = waiter {
+                    waiter.notify();
+                    true
+                } else {
+                    false
+                }
             }
             State::Closed => {
-                unreachable!("notify_slow: should not be called when the queue is closed!")
+                debug_assert!(false, "entered unreachable code: notify_slow: should not be called when the queue is closed!");
+                false
             }
         }
     }
