@@ -131,62 +131,102 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         }
     }
 
+    /// Start waiting for a notification.
+    ///
+    /// If the queue has a stored notification, this consumes it and returns
+    /// [`WaitResult::Notified`] without adding the waiter to the queue. If the
+    /// queue is closed, this returns [`WaitResult::Closed`] without adding the
+    /// waiter to the queue. Otherwise, the waiter is enqueued, and this returns
+    /// [`WaitResult::Wait`].
     #[inline(always)]
     pub(crate) fn start_wait(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
-        test_println!("WaitQueue::start_wait");
-        // optimistically, acquire a stored notification before trying to lock.
-        match test_dbg!(self.state.compare_exchange(WAKING, EMPTY, AcqRel, Acquire)) {
+        test_println!("WaitQueue::start_wait({:p})", node);
+
+        // Optimistically, acquire a stored notification before trying to lock
+        // the wait list.
+        match test_dbg!(self.state.compare_exchange(WAKING, EMPTY, SeqCst, SeqCst)) {
             Ok(_) => return WaitResult::Notified,
             Err(CLOSED) => return WaitResult::Closed,
-            _ => {}
+            Err(_state) => {
+                debug_assert_eq!(
+                    _state, WAITING,
+                    "start_wait: unexpected wait queue state {:?} (expected WAITING). this is a bug!",
+                    _state,
+                );
+            }
         }
 
+        // Slow path: the queue is not closed, and we failed to consume a stored
+        // notification. We need to acquire the lock and enqueue the waiter.
         self.start_wait_slow(node, waiter)
     }
 
+    /// Slow path of `start_wait`: acquires the linked list lock, and adds the
+    /// waiter to the queue.
     #[cold]
     #[inline(never)]
     fn start_wait_slow(&self, node: Pin<&mut Waiter<T>>, waiter: &T) -> WaitResult {
-        test_println!("WaitQueue::start_wait_slow");
+        test_println!("WaitQueue::start_wait_slow({:p})", node);
         // There are no queued notifications to consume, and the queue is
         // still open. Therefore, it's time to actually push the waiter to
         // the queue...finally lol :)
 
         // Grab the lock...
         let mut list = self.list.lock();
+        // Reload the queue's state, as it may have changed while we were
+        // waiting to lock the linked list.
         let mut state = self.state.load(Acquire);
 
-        // Transition the state to WAITING and push the waiter.
         loop {
-            match state {
+            match test_dbg!(state) {
+                // The queue is empty: transition the state to WAITING, as we
+                // are adding a waiter.
                 EMPTY => {
-                    if let Err(actual) =
-                        test_dbg!(self.state.compare_exchange(EMPTY, WAITING, AcqRel, Acquire))
+                    match test_dbg!(self
+                        .state
+                        .compare_exchange_weak(EMPTY, WAITING, SeqCst, SeqCst))
                     {
-                        debug_assert!(actual == WAKING || actual == CLOSED);
-                        state = actual;
-                    } else {
-                        break;
-                    }
-                }
-                WAITING => break,
-                CLOSED => return WaitResult::Closed,
-                // consume the wakeup
-                WAKING => {
-                    if let Err(actual) =
-                        test_dbg!(self.state.compare_exchange(WAKING, EMPTY, AcqRel, Acquire))
-                    {
-                        debug_assert!(actual == EMPTY || actual == CLOSED);
-                        state = actual;
-                    } else {
-                        // consumed wakeup!
-                        return WaitResult::Notified;
+                        Ok(_) => break,
+                        Err(actual) => {
+                            debug_assert!(actual == WAKING || actual == CLOSED);
+                            state = actual;
+                        }
                     }
                 }
 
-                weird => unreachable!("notify_slow: unexpected state value {:?}", weird),
+                // The queue was woken while we were waiting to acquire the
+                // lock. Attempt to consume the wakeup.
+                WAKING => {
+                    match test_dbg!(self
+                        .state
+                        .compare_exchange_weak(WAKING, EMPTY, SeqCst, SeqCst))
+                    {
+                        // Consumed the wakeup!
+                        Ok(_) => return WaitResult::Notified,
+                        Err(actual) => {
+                            debug_assert!(actual == EMPTY || actual == CLOSED);
+                            state = actual;
+                        }
+                    }
+                }
+
+                // The queue closed while we were waiting to acquire the lock;
+                // we're done here!
+                CLOSED => return WaitResult::Closed,
+
+                // The queue is already in the WAITING state, so we don't need
+                // to mess with it.
+                _state => {
+                    debug_assert_eq!(_state, WAITING,
+                        "start_wait_slow: unexpected state value {:?} (expected WAITING). this is a bug!",
+                        _state,
+                    )
+                }
             }
         }
+
+        // Time to wait! Store the waiter in the node, advance the node's state
+        // to Waiting, and add it to the queue.
 
         unsafe {
             // Safety: we are holding the lock, and thus are allowed to mutate
@@ -195,50 +235,81 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 let _prev = node.waiter.replace(waiter.clone());
                 debug_assert!(
                     _prev.is_none(),
-                    "called `start_wait_slow` on a node that already had a waiter!"
+                    "start_wait_slow: called with a node that already had a waiter!"
                 );
             });
         }
 
         let _prev_state = test_dbg!(node.swap_state(WaiterState::Waiting));
-        debug_assert_eq!(_prev_state, WaiterState::Empty);
+        debug_assert_eq!(
+            _prev_state,
+            WaiterState::Empty,
+            "start_wait_slow: called with a node that was not in the empty state!"
+        );
         list.push_front(node);
 
         WaitResult::Wait
     }
 
+    /// Continue waiting for a notification.
+    ///
+    /// This is called when a waiter has been woken. It determines if the
+    /// node was woken from the queue, or if the wakeup was spurious. If the
+    /// wakeup was from the queue, this returns [`WaitResult::Notified`] or
+    /// [`WaitResult::Closed`]. Otherwise, if the wakeup was spurious, this will
+    /// lock the queue and check if the node's waiter needs to be updated.
     #[inline(always)]
     pub(crate) fn continue_wait(&self, node: Pin<&mut Waiter<T>>, my_waiter: &T) -> WaitResult {
         test_println!("WaitQueue::continue_wait({:p})", node);
-        let state = test_dbg!(node.state());
-        match state {
-            WaiterState::Woken => WaitResult::Notified,
-            WaiterState::Closed => WaitResult::Closed,
-            _state => {
-                debug_assert_eq!(
-                    _state,
-                    WaiterState::Waiting,
-                    "`continue_wait` should not be called while in empty state!"
-                );
-                self.continue_wait_slow(node, my_waiter)
-            }
-        }
-    }
 
-    #[cold]
-    #[inline(never)]
-    fn continue_wait_slow(&self, node: Pin<&mut Waiter<T>>, my_waiter: &T) -> WaitResult {
-        // if we are in the waiting state, the node is already in the queue, so
-        // we *must* lock to access the waiter fields.
-        let _list = self.list.lock();
-
+        // Fast path: check if the node was woken from the queue.
         let state = test_dbg!(node.state());
         match state {
             WaiterState::Woken => return WaitResult::Notified,
             WaiterState::Closed => return WaitResult::Closed,
-            _ => {}
+            _state => {
+                debug_assert_eq!(
+                    _state,
+                    WaiterState::Waiting,
+                    "continue_wait should not be called unless the node has been enqueued"
+                );
+            }
         }
 
+        // Slow path: received a spurious wakeup. We must lock the queue so that
+        // we can potentially modify the node's waiter.
+        self.continue_wait_slow(node, my_waiter)
+    }
+
+    /// Slow path for `continue_wait`: locks the linked list and updates the
+    /// node with a new waiter.
+    #[cold]
+    #[inline(never)]
+    fn continue_wait_slow(&self, node: Pin<&mut Waiter<T>>, my_waiter: &T) -> WaitResult {
+        test_println!("WaitQueue::continue_wait_slow({:p})", node);
+
+        // If the waiting task/thread was woken but no wakeup was assigned to
+        // the node, we may need to update the node with a new waiter.
+        // Therefore, lock the queue in order to modify the node.
+        let _list = self.list.lock();
+
+        // The node may have been woken while we were waiting to acquire the
+        // lock. If so, check the new state.
+        match test_dbg!(node.state()) {
+            WaiterState::Woken => return WaitResult::Notified,
+            WaiterState::Closed => return WaitResult::Closed,
+            _state => {
+                debug_assert_eq!(
+                    _state,
+                    WaiterState::Waiting,
+                    "continue_wait_slow should not be called unless the node has been enqueued"
+                );
+            }
+        }
+
+        // Okay, we were not woken and need to continue waiting. It may be
+        // necessary to update the waiter with a new waiter (in practice, this
+        // is only necessary in async).
         unsafe {
             node.with_node(|node| {
                 if let Some(ref mut waiter) = node.waiter {
@@ -246,6 +317,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                         *waiter = my_waiter.clone();
                     }
                 } else {
+                    // XXX(eliza): This branch should _probably_ never occur...
                     node.waiter = Some(my_waiter.clone());
                 }
             })
@@ -262,10 +334,16 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     #[inline(always)]
     pub(crate) fn notify(&self) -> bool {
         test_println!("WaitQueue::notify()");
-        let mut state = test_dbg!(self.state.load(Acquire));
 
-        while state == WAKING || state == EMPTY {
-            match test_dbg!(self.state.compare_exchange(state, WAKING, AcqRel, Acquire)) {
+        // Fast path: If the queue is empty, we can simply assign the
+        // notification to the queue.
+        let mut state = self.state.load(Acquire);
+
+        while test_dbg!(state) == WAKING || state == EMPTY {
+            match test_dbg!(self
+                .state
+                .compare_exchange_weak(state, WAKING, SeqCst, SeqCst))
+            {
                 // No waiters are currently waiting, assign the notification to
                 // the queue to be consumed by the next wait attempt.
                 Ok(_) => return false,
@@ -273,18 +351,24 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             }
         }
 
+        // Slow path: there are waiters in the queue, so we must acquire the
+        // lock and wake one of them.
         self.notify_slow(state)
     }
 
+    /// Slow path for `notify`: acquire the lock on the linked list, dequeue a
+    /// waiter, and notify it.
     #[cold]
     #[inline(never)]
     fn notify_slow(&self, state: usize) -> bool {
+        test_println!("WaitQueue::notify_slow(state: {})", state);
+
         let mut list = self.list.lock();
         match state {
             EMPTY | WAKING => {
-                if let Err(actual) = self.state.compare_exchange(state, WAKING, AcqRel, Acquire) {
+                if let Err(actual) = self.state.compare_exchange(state, WAKING, SeqCst, SeqCst) {
                     debug_assert!(actual == EMPTY || actual == WAKING);
-                    self.state.store(WAKING, Release);
+                    self.state.store(WAKING, SeqCst);
                 }
                 false
             }
@@ -293,6 +377,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     Some(node) => node,
                     None => unreachable!("if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}", self),
                 };
+
                 let waiter = unsafe {
                     // Safety: we are holding the lock, so it is okay to mutate
                     // the node.
@@ -302,7 +387,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 // If we popped the last node, transition back to the empty
                 // state.
                 if test_dbg!(list.is_empty()) {
-                    self.state.store(EMPTY, Release);
+                    self.state.store(EMPTY, SeqCst);
                 }
 
                 // drop the lock
@@ -351,17 +436,17 @@ impl<T: Notify> Waiter<T> {
     #[inline(never)]
     pub(crate) fn remove(self: Pin<&mut Self>, q: &WaitQueue<T>) {
         test_println!("Waiter::remove({:p})", self);
+        let mut list = q.list.lock();
         unsafe {
             // Safety: removing a node is unsafe even when the list is locked,
             // because there's no way to guarantee that the node is part of
             // *this* list. However, the potential callers of this method will
             // never have access to any other linked lists, so we can just kind
             // of assume that this is safe.
-            let mut list = q.list.lock();
             list.remove(self);
-            if test_dbg!(list.is_empty()) {
-                let _ = test_dbg!(q.state.compare_exchange(WAITING, EMPTY, SeqCst, SeqCst));
-            }
+        }
+        if test_dbg!(list.is_empty()) {
+            let _ = test_dbg!(q.state.compare_exchange(WAITING, EMPTY, SeqCst, SeqCst));
         }
     }
 
