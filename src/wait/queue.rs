@@ -228,17 +228,13 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         // Time to wait! Store the waiter in the node, advance the node's state
         // to Waiting, and add it to the queue.
 
-        unsafe {
-            // Safety: we are holding the lock, and thus are allowed to mutate
-            // the node.
-            node.with_node(|node| {
-                let _prev = node.waiter.replace(waiter.clone());
-                debug_assert!(
-                    _prev.is_none(),
-                    "start_wait_slow: called with a node that already had a waiter!"
-                );
-            });
-        }
+        node.with_node(&mut *list, |node| {
+            let _prev = node.waiter.replace(waiter.clone());
+            debug_assert!(
+                _prev.is_none(),
+                "start_wait_slow: called with a node that already had a waiter!"
+            );
+        });
 
         let _prev_state = test_dbg!(node.swap_state(WaiterState::Waiting));
         debug_assert_eq!(
@@ -246,7 +242,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             WaiterState::Empty,
             "start_wait_slow: called with a node that was not in the empty state!"
         );
-        list.push_front(node);
+        list.enqueue(node);
 
         WaitResult::Wait
     }
@@ -291,7 +287,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         // If the waiting task/thread was woken but no wakeup was assigned to
         // the node, we may need to update the node with a new waiter.
         // Therefore, lock the queue in order to modify the node.
-        let _list = self.list.lock();
+        let mut list = self.list.lock();
 
         // The node may have been woken while we were waiting to acquire the
         // lock. If so, check the new state.
@@ -310,18 +306,16 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         // Okay, we were not woken and need to continue waiting. It may be
         // necessary to update the waiter with a new waiter (in practice, this
         // is only necessary in async).
-        unsafe {
-            node.with_node(|node| {
-                if let Some(ref mut waiter) = node.waiter {
-                    if !waiter.same(my_waiter) {
-                        *waiter = my_waiter.clone();
-                    }
-                } else {
-                    // XXX(eliza): This branch should _probably_ never occur...
-                    node.waiter = Some(my_waiter.clone());
+        node.with_node(&mut *list, |node| {
+            if let Some(ref mut waiter) = node.waiter {
+                if !waiter.same(my_waiter) {
+                    *waiter = my_waiter.clone();
                 }
-            })
-        }
+            } else {
+                // XXX(eliza): This branch should _probably_ never occur...
+                node.waiter = Some(my_waiter.clone());
+            }
+        });
 
         WaitResult::Wait
     }
@@ -373,15 +367,9 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 false
             }
             WAITING => {
-                let node = match list.pop_back() {
-                    Some(node) => node,
+                let waiter = match list.dequeue(WaiterState::Woken) {
+                    Some(waiter) => waiter,
                     None => unreachable!("if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}", self),
-                };
-
-                let waiter = unsafe {
-                    // Safety: we are holding the lock, so it is okay to mutate
-                    // the node.
-                    node.take_waker(WaiterState::Woken)
                 };
 
                 // If we popped the last node, transition back to the empty
@@ -393,9 +381,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 // drop the lock
                 drop(list);
 
-                if let Some(waiter) = waiter {
-                    waiter.notify();
-                }
+                waiter.notify();
                 true
             }
             weird => unreachable!("notify_slow: unexpected state value {:?}", weird),
@@ -407,11 +393,8 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         test_println!("WaitQueue::close()");
         test_dbg!(self.state.store(CLOSED, Release));
         let mut list = self.list.lock();
-        while let Some(node) = list.pop_back() {
-            if let Some(waiter) = unsafe {
-                // Safety: we are holding the lock, so it is safe to mutate the node.
-                node.take_waker(WaiterState::Closed)
-            } {
+        while !list.is_empty() {
+            if let Some(waiter) = list.dequeue(WaiterState::Closed) {
                 waiter.notify();
             }
         }
@@ -454,36 +437,21 @@ impl<T: Notify> Waiter<T> {
     pub(crate) fn is_linked(&self) -> bool {
         test_dbg!(self.state()) == WaiterState::Waiting
     }
-
-    /// # Safety
-    ///
-    /// This is only safe to call while the list is locked.
-    #[inline]
-    unsafe fn take_waker(self: Pin<&mut Self>, new_state: WaiterState) -> Option<T> {
-        test_println!("Waiter::take_waker({:p}, {:?})", self, new_state);
-        let _prev_state = test_dbg!(self.swap_state(new_state));
-        debug_assert_eq!(_prev_state, WaiterState::Waiting);
-        self.with_node(|node| node.waiter.take())
-    }
-
-    #[inline(always)]
-    fn swap_state(&self, new_state: WaiterState) -> WaiterState {
-        self.state.swap(new_state as u8, AcqRel).into()
-    }
-
-    #[inline(always)]
-    fn state(&self) -> WaiterState {
-        self.state.load(Acquire).into()
-    }
 }
 
 impl<T> Waiter<T> {
     /// # Safety
     ///
-    /// This is only safe to call while the list is locked.
+    /// This is only safe to call while the list is locked. The dummy `_list`
+    /// parameter ensures this method is only called while holding the lock, so
+    /// this can be safe.
     #[inline(always)]
-    unsafe fn with_node<U>(&self, f: impl FnOnce(&mut Node<T>) -> U) -> U {
-        self.node.with_mut(|node| f(&mut *node))
+    fn with_node<U>(&self, _list: &mut List<T>, f: impl FnOnce(&mut Node<T>) -> U) -> U {
+        self.node.with_mut(|node| unsafe {
+            // Safety: the dummy `_list` argument ensures that the caller has
+            // the right to mutate the list (e.g. the list is locked).
+            f(&mut *node)
+        })
     }
 
     /// # Safety
@@ -505,6 +473,16 @@ impl<T> Waiter<T> {
     /// This is only safe to call while the list is locked.
     unsafe fn take_next(&mut self) -> Option<NonNull<Waiter<T>>> {
         self.node.with_mut(|node| (*node).next.take())
+    }
+
+    #[inline(always)]
+    fn swap_state(&self, new_state: WaiterState) -> WaiterState {
+        self.state.swap(new_state as u8, AcqRel).into()
+    }
+
+    #[inline(always)]
+    fn state(&self) -> WaiterState {
+        self.state.load(Acquire).into()
     }
 }
 
@@ -543,18 +521,24 @@ impl<T> List<T> {
         }
     }
 
-    fn push_front(&mut self, waiter: Pin<&mut Waiter<T>>) {
-        unsafe {
-            waiter.with_node(|node| {
-                node.next = self.head;
-                node.prev = None;
-            })
-        }
+    fn enqueue(&mut self, waiter: Pin<&mut Waiter<T>>) {
+        test_println!("List::enqueue({:p})", waiter);
 
-        let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(waiter)) };
+        let node = unsafe { Pin::into_inner_unchecked(waiter) };
+        let ptr = NonNull::from(&*node);
+        debug_assert_ne!(
+            self.head,
+            Some(ptr),
+            "tried to enqueue the same waiter twice!"
+        );
 
-        debug_assert_ne!(self.head, Some(ptr), "tried to push the same waiter twice!");
-        if let Some(mut head) = self.head.replace(ptr) {
+        let head = self.head.replace(ptr);
+        node.with_node(self, |node| {
+            node.next = head;
+            node.prev = None;
+        });
+
+        if let Some(mut head) = head {
             unsafe {
                 head.as_mut().set_prev(Some(ptr));
             }
@@ -565,35 +549,41 @@ impl<T> List<T> {
         }
     }
 
-    fn pop_back(&mut self) -> Option<Pin<&mut Waiter<T>>> {
+    fn dequeue(&mut self, new_state: WaiterState) -> Option<T> {
         let mut last = self.tail?;
-        test_println!("List::pop_back() -> {:p}", last);
+        test_println!("List::dequeue({:?}) -> {:p}", new_state, last);
 
-        unsafe {
-            let last = last.as_mut();
-            let prev = last.take_prev();
+        let last = unsafe { last.as_mut() };
+        let _prev_state = test_dbg!(last.swap_state(new_state));
+        debug_assert_eq!(_prev_state, WaiterState::Waiting);
 
-            match prev {
-                Some(mut prev) => {
-                    let _ = prev.as_mut().take_next();
-                }
-                None => self.head = None,
-            }
+        let (prev, waiter) = last.with_node(self, |node| {
+            node.next = None;
+            (node.prev.take(), node.waiter.take())
+        });
 
-            self.tail = prev;
-            last.take_next();
-            Some(Pin::new_unchecked(last))
+        match prev {
+            Some(mut prev) => unsafe {
+                let _ = prev.as_mut().take_next();
+            },
+            None => self.head = None,
         }
+
+        self.tail = prev;
+
+        waiter
     }
 
     unsafe fn remove(&mut self, node: Pin<&mut Waiter<T>>) {
+        test_println!("List::remove({:p})", node);
+
         let node_ref = node.get_unchecked_mut();
         let prev = node_ref.take_prev();
         let next = node_ref.take_next();
         let ptr = NonNull::from(node_ref);
 
         if let Some(mut prev) = prev {
-            prev.as_mut().with_node(|prev| {
+            prev.as_mut().with_node(self, |prev| {
                 debug_assert_eq!(prev.next, Some(ptr));
                 prev.next = next;
             });
@@ -602,7 +592,7 @@ impl<T> List<T> {
         }
 
         if let Some(mut next) = next {
-            next.as_mut().with_node(|next| {
+            next.as_mut().with_node(self, |next| {
                 debug_assert_eq!(next.prev, Some(ptr));
                 next.prev = prev;
             });
@@ -621,6 +611,7 @@ impl<T> fmt::Debug for List<T> {
         f.debug_struct("List")
             .field("head", &self.head)
             .field("tail", &self.tail)
+            .field("is_emtpy", &self.is_empty())
             .finish()
     }
 }
