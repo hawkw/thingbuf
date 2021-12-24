@@ -118,10 +118,10 @@ struct List<T> {
     tail: Link<Waiter<T>>,
 }
 
-const EMPTY: usize = 0b00;
-const WAITING: usize = 0b1;
-const WAKING: usize = 0b10;
-const CLOSED: usize = 0b100;
+const EMPTY: usize = 0;
+const WAITING: usize = 1;
+const WAKING: usize = 2;
+const CLOSED: usize = 3;
 
 impl<T: Notify + Unpin> WaitQueue<T> {
     pub(crate) fn new() -> Self {
@@ -385,7 +385,8 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     /// Close the queue, notifying all waiting tasks.
     pub(crate) fn close(&self) {
         test_println!("WaitQueue::close()");
-        test_dbg!(self.state.store(CLOSED, Release));
+
+        test_dbg!(self.state.store(CLOSED, SeqCst));
         let mut list = self.list.lock();
         while !list.is_empty() {
             if let Some(waiter) = list.dequeue(WaiterState::Closed) {
