@@ -204,7 +204,8 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                         _state,
                         State::Waiting,
                         "start_wait_slow: unexpected state value! this is a bug!",
-                    )
+                    );
+                    break;
                 }
             }
         }
