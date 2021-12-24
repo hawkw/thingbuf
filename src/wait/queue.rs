@@ -608,7 +608,7 @@ impl<T> fmt::Debug for List<T> {
         f.debug_struct("List")
             .field("head", &self.head)
             .field("tail", &self.tail)
-            .field("is_emtpy", &self.is_empty())
+            .field("is_empty", &self.is_empty())
             .finish()
     }
 }
