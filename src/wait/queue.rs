@@ -265,9 +265,12 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         });
 
         let _prev_state = test_dbg!(node.state.swap(WAITING, Release));
-        debug_assert_eq!(
-            _prev_state, EMPTY,
-            "start_wait_slow: called with a node that was not in the empty state!"
+        debug_assert!(
+            _prev_state == EMPTY || _prev_state == WAKING,
+            "start_wait_slow: called with a node that was not empty ({}) or woken ({})! actual={}",
+            EMPTY,
+            WAKING,
+            _prev_state,
         );
         list.enqueue(node);
 
