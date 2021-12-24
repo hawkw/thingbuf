@@ -147,13 +147,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         match test_dbg!(self.state.compare_exchange(WAKING, EMPTY, SeqCst, SeqCst)) {
             Ok(_) => return WaitResult::Notified,
             Err(CLOSED) => return WaitResult::Closed,
-            Err(_state) => {
-                debug_assert_eq!(
-                    _state, WAITING,
-                    "start_wait: unexpected wait queue state {:?} (expected WAITING). this is a bug!",
-                    _state,
-                );
-            }
+            Err(_) => {}
         }
 
         // Slow path: the queue is not closed, and we failed to consume a stored
