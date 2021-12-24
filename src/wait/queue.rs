@@ -1,9 +1,9 @@
 use crate::{
     loom::{
-        atomic::{AtomicU8, Ordering::*},
+        atomic::{AtomicU8, AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
-    util::mutex::Mutex,
+    util::{mutex::Mutex, CachePadded},
     wait::{Notify, WaitResult},
 };
 
@@ -64,7 +64,7 @@ pub(crate) struct WaitQueue<T> {
     /// These stored notifications are "consumed" when new waiters are
     /// registered; those waiters will be woken immediately rather than being
     /// enqueued to wait.
-    state: AtomicU8,
+    state: CachePadded<AtomicUsize>,
     /// The linked list of waiters.
     ///
     /// # Safety
@@ -102,9 +102,9 @@ struct Node<T> {
     _pin: PhantomPinned,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 #[repr(u8)]
-enum State {
+enum WaiterState {
     Empty = 0,
     Waiting = 1,
     Woken = 2,
@@ -118,10 +118,15 @@ struct List<T> {
     tail: Link<Waiter<T>>,
 }
 
+const EMPTY: usize = 0;
+const WAITING: usize = 1;
+const WAKING: usize = 2;
+const CLOSED: usize = 3;
+
 impl<T: Notify + Unpin> WaitQueue<T> {
     pub(crate) fn new() -> Self {
         Self {
-            state: AtomicU8::new(State::Empty as u8),
+            state: CachePadded(AtomicUsize::new(EMPTY)),
             list: Mutex::new(List::new()),
         }
     }
@@ -139,9 +144,9 @@ impl<T: Notify + Unpin> WaitQueue<T> {
 
         // Optimistically, acquire a stored notification before trying to lock
         // the wait list.
-        match test_dbg!(self.compare_exchange(State::Woken, State::Empty)) {
+        match test_dbg!(self.state.compare_exchange(WAKING, EMPTY, SeqCst, SeqCst)) {
             Ok(_) => return WaitResult::Notified,
-            Err(State::Closed) => return WaitResult::Closed,
+            Err(CLOSED) => return WaitResult::Closed,
             Err(_) => {}
         }
 
@@ -164,17 +169,20 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         let mut list = self.list.lock();
         // Reload the queue's state, as it may have changed while we were
         // waiting to lock the linked list.
-        let mut state = self.load();
+        let mut state = self.state.load(Acquire);
 
         loop {
             match test_dbg!(state) {
                 // The queue is empty: transition the state to WAITING, as we
                 // are adding a waiter.
-                State::Empty => {
-                    match test_dbg!(self.compare_exchange_weak(State::Empty, State::Waiting)) {
+                EMPTY => {
+                    match test_dbg!(self
+                        .state
+                        .compare_exchange_weak(EMPTY, WAITING, SeqCst, SeqCst))
+                    {
                         Ok(_) => break,
                         Err(actual) => {
-                            debug_assert!(actual == State::Woken || actual == State::Closed);
+                            debug_assert!(actual == WAKING || actual == CLOSED);
                             state = actual;
                         }
                     }
@@ -182,12 +190,15 @@ impl<T: Notify + Unpin> WaitQueue<T> {
 
                 // The queue was woken while we were waiting to acquire the
                 // lock. Attempt to consume the wakeup.
-                State::Woken => {
-                    match test_dbg!(self.compare_exchange_weak(State::Woken, State::Empty)) {
+                WAKING => {
+                    match test_dbg!(self
+                        .state
+                        .compare_exchange_weak(WAKING, EMPTY, SeqCst, SeqCst))
+                    {
                         // Consumed the wakeup!
                         Ok(_) => return WaitResult::Notified,
                         Err(actual) => {
-                            debug_assert!(actual == State::Empty || actual == State::Closed);
+                            debug_assert!(actual == EMPTY || actual == CLOSED);
                             state = actual;
                         }
                     }
@@ -195,15 +206,14 @@ impl<T: Notify + Unpin> WaitQueue<T> {
 
                 // The queue closed while we were waiting to acquire the lock;
                 // we're done here!
-                State::Closed => return WaitResult::Closed,
+                CLOSED => return WaitResult::Closed,
 
                 // The queue is already in the WAITING state, so we don't need
                 // to mess with it.
                 _state => {
-                    debug_assert_eq!(
+                    debug_assert_eq!(_state, WAITING,
+                        "start_wait_slow: unexpected state value {:?} (expected WAITING). this is a bug!",
                         _state,
-                        State::Waiting,
-                        "start_wait_slow: unexpected state value! this is a bug!",
                     );
                     break;
                 }
@@ -221,10 +231,10 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             );
         });
 
-        let _prev_state = test_dbg!(node.swap_state(State::Waiting));
+        let _prev_state = test_dbg!(node.swap_state(WaiterState::Waiting));
         debug_assert_eq!(
             _prev_state,
-            State::Empty,
+            WaiterState::Empty,
             "start_wait_slow: called with a node that was not in the empty state!"
         );
         list.enqueue(node);
@@ -246,12 +256,12 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         // Fast path: check if the node was woken from the queue.
         let state = test_dbg!(node.state());
         match state {
-            State::Woken => return WaitResult::Notified,
-            State::Closed => return WaitResult::Closed,
+            WaiterState::Woken => return WaitResult::Notified,
+            WaiterState::Closed => return WaitResult::Closed,
             _state => {
                 debug_assert_eq!(
                     _state,
-                    State::Waiting,
+                    WaiterState::Waiting,
                     "continue_wait should not be called unless the node has been enqueued"
                 );
             }
@@ -277,12 +287,12 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         // The node may have been woken while we were waiting to acquire the
         // lock. If so, check the new state.
         match test_dbg!(node.state()) {
-            State::Woken => return WaitResult::Notified,
-            State::Closed => return WaitResult::Closed,
+            WaiterState::Woken => return WaitResult::Notified,
+            WaiterState::Closed => return WaitResult::Closed,
             _state => {
                 debug_assert_eq!(
                     _state,
-                    State::Waiting,
+                    WaiterState::Waiting,
                     "continue_wait_slow should not be called unless the node has been enqueued"
                 );
             }
@@ -316,10 +326,13 @@ impl<T: Notify + Unpin> WaitQueue<T> {
 
         // Fast path: If the queue is empty, we can simply assign the
         // notification to the queue.
-        let mut state = self.load();
+        let mut state = self.state.load(Acquire);
 
-        while test_dbg!(state) == State::Woken || state == State::Empty {
-            match test_dbg!(self.compare_exchange_weak(state, State::Woken)) {
+        while test_dbg!(state) == WAKING || state == EMPTY {
+            match test_dbg!(self
+                .state
+                .compare_exchange_weak(state, WAKING, SeqCst, SeqCst))
+            {
                 // No waiters are currently waiting, assign the notification to
                 // the queue to be consumed by the next wait attempt.
                 Ok(_) => return false,
@@ -336,26 +349,26 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     /// waiter, and notify it.
     #[cold]
     #[inline(never)]
-    fn notify_slow(&self, state: State) -> bool {
-        test_println!("WaitQueue::notify_slow({:?})", state);
+    fn notify_slow(&self, state: usize) -> bool {
+        test_println!("WaitQueue::notify_slow(state: {})", state);
 
         let mut list = self.list.lock();
         match state {
-            State::Empty | State::Woken => {
-                if let Err(actual) = test_dbg!(self.compare_exchange(state, State::Woken)) {
-                    debug_assert!(actual == State::Empty || actual == State::Woken);
-                    self.store(State::Woken);
+            EMPTY | WAKING => {
+                if let Err(actual) = self.state.compare_exchange(state, WAKING, SeqCst, SeqCst) {
+                    debug_assert!(actual == EMPTY || actual == WAKING);
+                    self.state.store(WAKING, SeqCst);
                 }
                 false
             }
-            State::Waiting => {
-                let waiter = list.dequeue(State::Woken);
+            WAITING => {
+                let waiter = list.dequeue(WaiterState::Woken);
                 debug_assert!(waiter.is_some(), "if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}", self);
 
                 // If we popped the last node, transition back to the empty
                 // state.
                 if test_dbg!(list.is_empty()) {
-                    self.store(State::Empty);
+                    self.state.store(EMPTY, SeqCst);
                 }
 
                 // drop the lock
@@ -369,10 +382,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     false
                 }
             }
-            State::Closed => {
-                debug_assert!(false, "entered unreachable code: notify_slow: should not be called when the queue is closed!");
-                false
-            }
+            weird => unreachable!("notify_slow: unexpected state value {:?}", weird),
         }
     }
 
@@ -380,41 +390,13 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     pub(crate) fn close(&self) {
         test_println!("WaitQueue::close()");
 
-        test_dbg!(self.store(State::Closed));
+        test_dbg!(self.state.store(CLOSED, SeqCst));
         let mut list = self.list.lock();
         while !list.is_empty() {
-            if let Some(waiter) = list.dequeue(State::Closed) {
+            if let Some(waiter) = list.dequeue(WaiterState::Closed) {
                 waiter.notify();
             }
         }
-    }
-}
-
-impl<T> WaitQueue<T> {
-    #[inline(always)]
-    fn load(&self) -> State {
-        self.state.load(Acquire).into()
-    }
-
-    #[inline(always)]
-    fn store(&self, next: State) {
-        self.state.store(next as u8, SeqCst);
-    }
-
-    #[inline(always)]
-    fn compare_exchange_weak(&self, current: State, next: State) -> Result<State, State> {
-        self.state
-            .compare_exchange_weak(current as u8, next as u8, SeqCst, SeqCst)
-            .map(State::from)
-            .map_err(State::from)
-    }
-
-    #[inline(always)]
-    fn compare_exchange(&self, current: State, next: State) -> Result<State, State> {
-        self.state
-            .compare_exchange(current as u8, next as u8, SeqCst, SeqCst)
-            .map(State::from)
-            .map_err(State::from)
     }
 }
 
@@ -429,7 +411,7 @@ impl<T: Notify> Waiter<T> {
                 waiter: None,
                 _pin: PhantomPinned,
             }),
-            state: AtomicU8::new(State::Empty as u8),
+            state: AtomicU8::new(WaiterState::Empty as u8),
         }
     }
 
@@ -446,13 +428,13 @@ impl<T: Notify> Waiter<T> {
             list.remove(self);
         }
         if test_dbg!(list.is_empty()) {
-            let _ = test_dbg!(q.compare_exchange(State::Waiting, State::Empty));
+            let _ = test_dbg!(q.state.compare_exchange(WAITING, EMPTY, SeqCst, SeqCst));
         }
     }
 
     #[inline]
     pub(crate) fn is_linked(&self) -> bool {
-        test_dbg!(self.state()) == State::Waiting
+        test_dbg!(self.state()) == WaiterState::Waiting
     }
 }
 
@@ -493,12 +475,12 @@ impl<T> Waiter<T> {
     }
 
     #[inline(always)]
-    fn swap_state(&self, new_state: State) -> State {
+    fn swap_state(&self, new_state: WaiterState) -> WaiterState {
         self.state.swap(new_state as u8, AcqRel).into()
     }
 
     #[inline(always)]
-    fn state(&self) -> State {
+    fn state(&self) -> WaiterState {
         self.state.load(Acquire).into()
     }
 }
@@ -508,21 +490,21 @@ unsafe impl<T: Send> Sync for Waiter<T> {}
 
 // === impl WaiterState ===
 
-impl From<u8> for State {
+impl From<u8> for WaiterState {
     #[inline(always)]
     fn from(val: u8) -> Self {
         match val {
-            v if v == State::Waiting as u8 => State::Waiting,
-            v if v == State::Woken as u8 => State::Woken,
-            v if v == State::Closed as u8 => State::Closed,
+            v if v == WaiterState::Waiting as u8 => WaiterState::Waiting,
+            v if v == WaiterState::Woken as u8 => WaiterState::Woken,
+            v if v == WaiterState::Closed as u8 => WaiterState::Closed,
             v => {
                 debug_assert_eq!(
                     v,
-                    State::Empty as u8,
-                    "unexpected waiter state {:?} (should have been State::Empty)",
+                    WaiterState::Empty as u8,
+                    "unexpected waiter state {:?} (should have been WaiterState::Empty)",
                     v,
                 );
-                State::Empty
+                WaiterState::Empty
             }
         }
     }
@@ -566,13 +548,13 @@ impl<T> List<T> {
         }
     }
 
-    fn dequeue(&mut self, new_state: State) -> Option<T> {
+    fn dequeue(&mut self, new_state: WaiterState) -> Option<T> {
         let mut last = self.tail?;
         test_println!("List::dequeue({:?}) -> {:p}", new_state, last);
 
         let last = unsafe { last.as_mut() };
         let _prev_state = test_dbg!(last.swap_state(new_state));
-        debug_assert_eq!(_prev_state, State::Waiting);
+        debug_assert_eq!(_prev_state, WaiterState::Waiting);
 
         let (prev, waiter) = last.with_node(self, |node| {
             node.next = None;
