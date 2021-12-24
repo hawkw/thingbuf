@@ -1,6 +1,6 @@
 use crate::{
     loom::{
-        atomic::{AtomicU8, AtomicUsize, Ordering::*},
+        atomic::{AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
     util::{mutex::Mutex, CachePadded},
@@ -86,7 +86,7 @@ pub(crate) struct WaitQueue<T> {
 #[derive(Debug)]
 pub(crate) struct Waiter<T> {
     node: UnsafeCell<Node<T>>,
-    state: AtomicU8,
+    state: AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -100,15 +100,6 @@ struct Node<T> {
     // <https://github.com/rust-lang/rust/pull/82834>
     #[pin]
     _pin: PhantomPinned,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-#[repr(u8)]
-enum WaiterState {
-    Empty = 0,
-    Waiting = 1,
-    Woken = 2,
-    Closed = 3,
 }
 
 type Link<T> = Option<NonNull<T>>;
@@ -231,10 +222,9 @@ impl<T: Notify + Unpin> WaitQueue<T> {
             );
         });
 
-        let _prev_state = test_dbg!(node.swap_state(WaiterState::Waiting));
+        let _prev_state = test_dbg!(node.state.swap(WAITING, Release));
         debug_assert_eq!(
-            _prev_state,
-            WaiterState::Empty,
+            _prev_state, EMPTY,
             "start_wait_slow: called with a node that was not in the empty state!"
         );
         list.enqueue(node);
@@ -254,14 +244,13 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         test_println!("WaitQueue::continue_wait({:p})", node);
 
         // Fast path: check if the node was woken from the queue.
-        let state = test_dbg!(node.state());
+        let state = test_dbg!(node.state.load(Acquire));
         match state {
-            WaiterState::Woken => return WaitResult::Notified,
-            WaiterState::Closed => return WaitResult::Closed,
+            WAKING => return WaitResult::Notified,
+            CLOSED => return WaitResult::Closed,
             _state => {
                 debug_assert_eq!(
-                    _state,
-                    WaiterState::Waiting,
+                    _state, WAITING,
                     "continue_wait should not be called unless the node has been enqueued"
                 );
             }
@@ -286,13 +275,12 @@ impl<T: Notify + Unpin> WaitQueue<T> {
 
         // The node may have been woken while we were waiting to acquire the
         // lock. If so, check the new state.
-        match test_dbg!(node.state()) {
-            WaiterState::Woken => return WaitResult::Notified,
-            WaiterState::Closed => return WaitResult::Closed,
+        match test_dbg!(node.state.load(Acquire)) {
+            WAKING => return WaitResult::Notified,
+            CLOSED => return WaitResult::Closed,
             _state => {
                 debug_assert_eq!(
-                    _state,
-                    WaiterState::Waiting,
+                    _state, WAITING,
                     "continue_wait_slow should not be called unless the node has been enqueued"
                 );
             }
@@ -362,7 +350,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 false
             }
             WAITING => {
-                let waiter = list.dequeue(WaiterState::Woken);
+                let waiter = list.dequeue(WAKING);
                 debug_assert!(waiter.is_some(), "if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}", self);
 
                 // If we popped the last node, transition back to the empty
@@ -393,7 +381,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         test_dbg!(self.state.store(CLOSED, SeqCst));
         let mut list = self.list.lock();
         while !list.is_empty() {
-            if let Some(waiter) = list.dequeue(WaiterState::Closed) {
+            if let Some(waiter) = list.dequeue(CLOSED) {
                 waiter.notify();
             }
         }
@@ -411,7 +399,7 @@ impl<T: Notify> Waiter<T> {
                 waiter: None,
                 _pin: PhantomPinned,
             }),
-            state: AtomicU8::new(WaiterState::Empty as u8),
+            state: AtomicUsize::new(EMPTY),
         }
     }
 
@@ -434,7 +422,7 @@ impl<T: Notify> Waiter<T> {
 
     #[inline]
     pub(crate) fn is_linked(&self) -> bool {
-        test_dbg!(self.state()) == WaiterState::Waiting
+        test_dbg!(self.state.load(Acquire)) == WAITING
     }
 }
 
@@ -473,42 +461,10 @@ impl<T> Waiter<T> {
     unsafe fn take_next(&mut self) -> Option<NonNull<Waiter<T>>> {
         self.node.with_mut(|node| (*node).next.take())
     }
-
-    #[inline(always)]
-    fn swap_state(&self, new_state: WaiterState) -> WaiterState {
-        self.state.swap(new_state as u8, AcqRel).into()
-    }
-
-    #[inline(always)]
-    fn state(&self) -> WaiterState {
-        self.state.load(Acquire).into()
-    }
 }
 
 unsafe impl<T: Send> Send for Waiter<T> {}
 unsafe impl<T: Send> Sync for Waiter<T> {}
-
-// === impl WaiterState ===
-
-impl From<u8> for WaiterState {
-    #[inline(always)]
-    fn from(val: u8) -> Self {
-        match val {
-            v if v == WaiterState::Waiting as u8 => WaiterState::Waiting,
-            v if v == WaiterState::Woken as u8 => WaiterState::Woken,
-            v if v == WaiterState::Closed as u8 => WaiterState::Closed,
-            v => {
-                debug_assert_eq!(
-                    v,
-                    WaiterState::Empty as u8,
-                    "unexpected waiter state {:?} (should have been WaiterState::Empty)",
-                    v,
-                );
-                WaiterState::Empty
-            }
-        }
-    }
-}
 
 // === impl List ===
 
@@ -548,13 +504,13 @@ impl<T> List<T> {
         }
     }
 
-    fn dequeue(&mut self, new_state: WaiterState) -> Option<T> {
+    fn dequeue(&mut self, new_state: usize) -> Option<T> {
         let mut last = self.tail?;
         test_println!("List::dequeue({:?}) -> {:p}", new_state, last);
 
         let last = unsafe { last.as_mut() };
-        let _prev_state = test_dbg!(last.swap_state(new_state));
-        debug_assert_eq!(_prev_state, WaiterState::Waiting);
+        let _prev_state = test_dbg!(last.state.swap(new_state, Release));
+        debug_assert_eq!(_prev_state, WAITING);
 
         let (prev, waiter) = last.with_node(self, |node| {
             node.next = None;
