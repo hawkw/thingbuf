@@ -12,7 +12,7 @@
 
 use crate::{
     loom::{atomic::AtomicUsize, hint},
-    wait::{queue, Notify, WaitCell, WaitQueue, WaitResult},
+    wait::{Notify, WaitCell, WaitQueue, WaitResult},
     Ref, ThingBuf,
 };
 use core::fmt;
@@ -110,19 +110,6 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
             }
             Err(e) => Err(e.with_value(val)),
         }
-    }
-
-    /// Performs one iteration of the `send_ref` loop.
-    ///
-    /// The loop itself has to be written in the actual `send` method's
-    /// implementation, rather than on `inner`, because it might be async and
-    /// may yield, or might park the thread.
-    fn poll_send_ref(
-        &self,
-        _node: Pin<&mut queue::Waiter<N>>,
-        _register: impl FnMut(&mut Option<N>),
-    ) -> Poll<Result<SendRefInner<'_, T, N>, Closed>> {
-        unimplemented!()
     }
 
     /// Performs one iteration of the `recv_ref` loop.
