@@ -85,8 +85,8 @@ pub(crate) struct WaitQueue<T> {
 /// A waiter node which may be linked into a wait queue.
 #[derive(Debug)]
 pub(crate) struct Waiter<T> {
+    state: CachePadded<AtomicUsize>,
     node: UnsafeCell<Node<T>>,
-    state: AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -393,13 +393,13 @@ impl<T: Notify + Unpin> WaitQueue<T> {
 impl<T: Notify> Waiter<T> {
     pub(crate) fn new() -> Self {
         Self {
+            state: CachePadded(AtomicUsize::new(EMPTY)),
             node: UnsafeCell::new(Node {
                 next: None,
                 prev: None,
                 waiter: None,
                 _pin: PhantomPinned,
             }),
-            state: AtomicUsize::new(EMPTY),
         }
     }
 
