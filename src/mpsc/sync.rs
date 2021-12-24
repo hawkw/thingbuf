@@ -55,28 +55,43 @@ impl<T: Default> Sender<T> {
     }
 
     pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
-        let mut waiter = queue::Waiter::new();
-        loop {
-            // perform one send ref loop iteration
+        // fast path: avoid getting the thread and constructing the node if the
+        // slot is immediately ready.
+        match self.inner.try_send_ref() {
+            Ok(slot) => return Ok(SendRef(slot)),
+            Err(TrySendError::Closed(_)) => return Err(Closed(())),
+            _ => {}
+        }
 
-            let waiter = unsafe {
+        let mut waiter = queue::Waiter::new();
+        let mut unqueued = true;
+        let thread = thread::current();
+        loop {
+            let node = unsafe {
                 // Safety: in this case, it's totally safe to pin the waiter, as
                 // it is owned uniquely by this function, and it cannot possibly
                 // be moved while this thread is parked.
                 Pin::new_unchecked(&mut waiter)
             };
-            if let Poll::Ready(result) = self.inner.poll_send_ref(waiter, |thread| {
-                if thread.is_none() {
-                    let current = thread::current();
-                    test_println!("registering {:?}", current);
-                    *thread = Some(current);
-                }
-            }) {
-                return result.map(SendRef);
-            }
 
-            // if that iteration failed, park the thread.
-            thread::park();
+            let wait = if unqueued {
+                test_dbg!(self.inner.tx_wait.start_wait(node, &thread))
+            } else {
+                test_dbg!(self.inner.tx_wait.continue_wait(node, &thread))
+            };
+
+            match wait {
+                WaitResult::Closed => return Err(Closed(())),
+                WaitResult::Notified => match self.inner.try_send_ref() {
+                    Ok(slot) => return Ok(SendRef(slot)),
+                    Err(TrySendError::Closed(_)) => return Err(Closed(())),
+                    _ => {}
+                },
+                WaitResult::Wait => {
+                    unqueued = false;
+                    thread::park();
+                }
+            }
         }
     }
 

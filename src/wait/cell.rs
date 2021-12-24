@@ -6,7 +6,10 @@ use crate::{
         },
         cell::UnsafeCell,
     },
-    util::panic::{self, RefUnwindSafe, UnwindSafe},
+    util::{
+        panic::{self, RefUnwindSafe, UnwindSafe},
+        CachePadded,
+    },
     wait::{Notify, WaitResult},
 };
 use core::{fmt, ops};
@@ -29,7 +32,7 @@ use core::{fmt, ops};
 ///
 /// [`AtomicWaker`]: https://github.com/tokio-rs/tokio/blob/09b770c5db31a1f35631600e1d239679354da2dd/tokio/src/sync/task/atomic_waker.rs
 pub(crate) struct WaitCell<T> {
-    lock: AtomicUsize,
+    lock: CachePadded<AtomicUsize>,
     waiter: UnsafeCell<Option<T>>,
 }
 
@@ -42,7 +45,7 @@ impl<T> WaitCell<T> {
     #[cfg(not(all(loom, test)))]
     pub(crate) const fn new() -> Self {
         Self {
-            lock: AtomicUsize::new(State::WAITING.0),
+            lock: CachePadded(AtomicUsize::new(State::WAITING.0)),
             waiter: UnsafeCell::new(None),
         }
     }
@@ -50,7 +53,7 @@ impl<T> WaitCell<T> {
     #[cfg(all(loom, test))]
     pub(crate) fn new() -> Self {
         Self {
-            lock: AtomicUsize::new(State::WAITING.0),
+            lock: CachePadded(AtomicUsize::new(State::WAITING.0)),
             waiter: UnsafeCell::new(None),
         }
     }
@@ -140,20 +143,16 @@ impl<T: Notify> WaitCell<T> {
     }
 
     pub(crate) fn notify(&self) -> bool {
-        self.notify2(false)
+        self.notify2(State::WAITING)
     }
 
     pub(crate) fn close_tx(&self) {
-        self.notify2(true);
+        self.notify2(State::TX_CLOSED);
     }
 
-    fn notify2(&self, close: bool) -> bool {
+    fn notify2(&self, close: State) -> bool {
         test_println!("notifying; close={:?};", close);
-        let bits = if close {
-            State::NOTIFYING | State::TX_CLOSED
-        } else {
-            State::NOTIFYING
-        };
+        let bits = State::NOTIFYING | close;
         test_dbg!(bits);
         if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
             // we have the lock!

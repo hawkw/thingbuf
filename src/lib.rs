@@ -106,7 +106,7 @@ impl Core {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn idx_gen(&self, val: usize) -> (usize, usize) {
         (val & self.idx_mask, val & self.gen_mask)
     }
@@ -138,6 +138,7 @@ impl Core {
         test_dbg!(self.tail.fetch_or(self.closed, SeqCst) & self.closed == 0)
     }
 
+    #[inline(always)]
     fn push_ref<'slots, T, S>(
         &self,
         slots: &'slots S,
@@ -226,6 +227,7 @@ impl Core {
         }
     }
 
+    #[inline(always)]
     fn pop_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, mpsc::TrySendError>
     where
         S: ops::Index<usize, Output = Slot<T>> + ?Sized,
