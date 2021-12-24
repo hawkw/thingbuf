@@ -64,7 +64,7 @@ impl<T: Default> Sender<T> {
         }
 
         let mut waiter = queue::Waiter::new();
-        let mut has_queued = false;
+        let mut unqueued = true;
         let thread = thread::current();
         loop {
             let node = unsafe {
@@ -74,12 +74,10 @@ impl<T: Default> Sender<T> {
                 Pin::new_unchecked(&mut waiter)
             };
 
-            let wait = if has_queued {
-                // spurious wakeup?
-                test_dbg!(self.inner.tx_wait.continue_wait(node, &thread))
-            } else {
-                has_queued = true;
+            let wait = if unqueued {
                 test_dbg!(self.inner.tx_wait.start_wait(node, &thread))
+            } else {
+                test_dbg!(self.inner.tx_wait.continue_wait(node, &thread))
             };
 
             match wait {
@@ -90,6 +88,7 @@ impl<T: Default> Sender<T> {
                     _ => {}
                 },
                 WaitResult::Wait => {
+                    unqueued = false;
                     thread::park();
                 }
             }
