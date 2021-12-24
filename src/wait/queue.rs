@@ -57,13 +57,27 @@ use core::{fmt, marker::PhantomPinned, pin::Pin, ptr::NonNull};
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
 pub(crate) struct WaitQueue<T> {
-    /// The wait queue's state variable. The first bit indicates whether the
-    /// queue is closed; the remainder is a counter of notifications assigned to
-    /// the queue because no waiters were currently available to be woken.
+    /// The wait queue's state variable.
     ///
-    /// These stored notifications are "consumed" when new waiters are
-    /// registered; those waiters will be woken immediately rather than being
-    /// enqueued to wait.
+    /// The queue is always in one of the following states:
+    ///
+    /// - `EMPTY`: No waiters are queued, and there is no pending notification.
+    ///   Waiting while the queue is in this state will enqueue the waiter;
+    ///   notifying while in this state will store a pending notification in the
+    ///   queue, transitioning to the `WAKING` state.
+    ///
+    /// - `WAITING`: There are one or more waiters in the queue. Waiting while
+    ///   the queue is in this state will not transition the state. Waking while
+    ///   in this state will wake the first waiter in the queue; if this empties
+    ///   the queue, then the queue will transition to the `EMPTY` state.
+    ///
+    /// - `WAKING`: The queue has a stored notification. Waiting while the queue
+    ///   is in this state will consume the pending notification *without*
+    ///   enqueueing the waiter and transition the queue to the `EMPTY` state.
+    ///   Waking while in this state will leave the queue in this state.
+    ///
+    /// - `CLOSED`: The queue is closed. Waiting while in this state will return
+    ///   [`WaitResult::Closed`] without transitioning the queue's state.
     state: CachePadded<AtomicUsize>,
     /// The linked list of waiters.
     ///
@@ -77,15 +91,43 @@ pub(crate) struct WaitQueue<T> {
     /// modified through the list, so the lock must be held when modifying the
     /// node.
     ///
-    /// A spinlock is used on `no_std` platforms; [`std::sync::Mutex`] is used
-    /// when the standard library is available.
+    /// A spinlock is used on `no_std` platforms; [`std::sync::Mutex`] or
+    /// `parking_lot::Mutex` are used when the standard library is available
+    /// (depending on feature flags).
     list: Mutex<List<T>>,
 }
 
 /// A waiter node which may be linked into a wait queue.
 #[derive(Debug)]
 pub(crate) struct Waiter<T> {
+    /// The waiter's state variable.
+    ///
+    /// A waiter is always in one of the following states:
+    ///
+    /// - `EMPTY`: The waiter is not linked in the queue, and does not have a
+    ///   `Thread`/`Waker`.
+    ///
+    /// - `WAITING`: The waiter is linked in the queue and has a
+    ///   `Thread`/`Waker`.
+    ///
+    /// - `WAKING`: The waiter has been notified by the wait queue. If it is in
+    ///   this state, it is *not* linked into the queue, and does not have a
+    ///   `Thread`/`Waker`.
+    ///
+    /// - `WAKING`: The waiter has been notified because the wait queue closed.
+    ///   If it is in this state, it is *not* linked into the queue, and does
+    ///   not have a `Thread`/`Waker`.
+    ///
+    /// This may be inspected without holding the lock; it can be used to
+    /// determine whether the lock must be acquired.
     state: CachePadded<AtomicUsize>,
+
+    /// The linked list node and stored `Thread`/`Waker`.
+    ///
+    /// # Safety
+    ///
+    /// This `UnsafeCell` may only be accessed while holding the `Mutex` around
+    /// the wait queue's linked list!
     node: UnsafeCell<Node<T>>,
 }
 
