@@ -94,3 +94,50 @@ fn static_storage_stringbuf() {
         assert_eq!(ln.parse::<usize>(), Ok(n));
     }
 }
+
+#[tokio::test]
+async fn static_async_channel() {
+    use std::collections::HashSet;
+    use thingbuf::mpsc;
+
+    const N_PRODUCERS: usize = 8;
+    const N_SENDS: usize = N_PRODUCERS * 2;
+
+    static CHANNEL: mpsc::StaticChannel<usize, N_PRODUCERS> = mpsc::StaticChannel::new();
+
+    async fn do_producer(tx: mpsc::StaticSender<usize>, n: usize) {
+        let tag = n * N_SENDS;
+        for i in 0..N_SENDS {
+            let msg = i + tag;
+            println!("sending {}...", msg);
+            tx.send(msg).await.unwrap();
+            println!("sent {}!", msg);
+        }
+        println!("PRODUCER {} DONE!", n);
+    }
+
+    let (tx, rx) = CHANNEL.split();
+    for n in 0..N_PRODUCERS {
+        tokio::spawn(do_producer(tx.clone(), n));
+    }
+    drop(tx);
+
+    let mut results = HashSet::new();
+    while let Some(val) = {
+        println!("receiving...");
+        rx.recv().await
+    } {
+        println!("received {}!", val);
+        results.insert(val);
+    }
+
+    let results = dbg!(results);
+
+    for n in 0..N_PRODUCERS {
+        let tag = n * N_SENDS;
+        for i in 0..N_SENDS {
+            let msg = i + tag;
+            assert!(results.contains(&msg), "missing message {:?}", msg);
+        }
+    }
+}

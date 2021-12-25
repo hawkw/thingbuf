@@ -15,7 +15,7 @@ use crate::{
     wait::{Notify, WaitCell, WaitQueue, WaitResult},
     Core, Ref, Slot,
 };
-use core::{fmt, marker::PhantomData, pin::Pin, task::Poll};
+use core::{fmt, ops::Index, task::Poll};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -27,13 +27,12 @@ pub enum TrySendError<T = ()> {
 #[derive(Debug)]
 pub struct Closed<T = ()>(T);
 
-struct Inner<T, S, N> {
+#[derive(Debug)]
+struct ChannelCore<N> {
     core: Core,
-    slots: S,
     rx_wait: WaitCell<N>,
     tx_count: AtomicUsize,
     tx_wait: WaitQueue<N>,
-    _val: PhantomData<T>,
 }
 
 struct SendRefInner<'a, T, N: Notify> {
@@ -71,33 +70,29 @@ impl TrySendError {
 }
 
 // ==== impl Inner ====
-impl<T, S, N> Inner<T, S, N> {
+impl<N> ChannelCore<N> {
     #[cfg(not(loom))]
-    const fn new(core: Core, slots: S) -> Self {
+    const fn new(capacity: usize) -> Self {
         Self {
-            core,
-            slots,
+            core: Core::new(capacity),
             rx_wait: WaitCell::new(),
             tx_count: AtomicUsize::new(1),
             tx_wait: WaitQueue::new(),
-            _val: PhantomData,
         }
     }
 
     #[cfg(loom)]
-    fn new(core: Core, slots: S) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
-            core,
-            slots,
+            core: Core::new(capacity),
             rx_wait: WaitCell::new(),
             tx_count: AtomicUsize::new(1),
             tx_wait: WaitQueue::new(),
-            _val: PhantomData,
         }
     }
 }
 
-impl<S, T, N> Inner<S, T, N>
+impl<N> ChannelCore<N>
 where
     N: Notify + Unpin,
 {
@@ -110,23 +105,28 @@ where
     }
 }
 
-impl<T, S, N> Inner<T, S, N>
+impl<N> ChannelCore<N>
 where
-    S: AsRef<[Slot<T>]>,
-    T: Default,
     N: Notify + Unpin,
 {
-    fn try_send_ref(&self) -> Result<SendRefInner<'_, T, N>, TrySendError> {
-        self.core
-            .push_ref(self.slots.as_ref())
-            .map(|slot| SendRefInner {
-                _notify: NotifyRx(&self.rx_wait),
-                slot,
-            })
+    fn try_send_ref<'a, T>(
+        &'a self,
+        slots: &'a [Slot<T>],
+    ) -> Result<SendRefInner<'a, T, N>, TrySendError>
+    where
+        T: Default,
+    {
+        self.core.push_ref(slots).map(|slot| SendRefInner {
+            _notify: NotifyRx(&self.rx_wait),
+            slot,
+        })
     }
 
-    fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
-        match self.try_send_ref() {
+    fn try_send<T>(&self, slots: &[Slot<T>], val: T) -> Result<(), TrySendError<T>>
+    where
+        T: Default,
+    {
+        match self.try_send_ref(slots) {
             Ok(mut slot) => {
                 slot.with_mut(|slot| *slot = val);
                 Ok(())
@@ -140,11 +140,19 @@ where
     /// The loop itself has to be written in the actual `send` method's
     /// implementation, rather than on `inner`, because it might be async and
     /// may yield, or might park the thread.
-    fn poll_recv_ref(&self, mk_waiter: impl Fn() -> N) -> Poll<Option<Ref<'_, T>>> {
+    fn poll_recv_ref<'a, T, S>(
+        &'a self,
+        slots: &'a S,
+        mk_waiter: impl Fn() -> N,
+    ) -> Poll<Option<Ref<'a, T>>>
+    where
+        S: Index<usize, Output = Slot<T>> + ?Sized,
+        T: Default,
+    {
         macro_rules! try_poll_recv {
             () => {
                 // If we got a value, return it!
-                match self.core.pop_ref(self.slots.as_ref()) {
+                match self.core.pop_ref(slots) {
                     Ok(slot) => return Poll::Ready(Some(slot)),
                     Err(TrySendError::Closed(_)) => return Poll::Ready(None),
                     _ => {}
@@ -174,7 +182,7 @@ where
                     // the channel is closed (all the receivers are dropped).
                     // however, there may be messages left in the queue. try
                     // popping from the queue until it's empty.
-                    return Poll::Ready(self.core.pop_ref(self.slots.as_ref()).ok());
+                    return Poll::Ready(self.core.pop_ref(slots).ok());
                 }
                 WaitResult::Notified => {
                     // we were notified while we were trying to register the
@@ -183,18 +191,6 @@ where
                 }
             }
         }
-    }
-}
-
-impl<S, T, N: Notify> fmt::Debug for Inner<S, T, N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("mpsc::Inner")
-            .field("core", &self.core)
-            .field("slots", &format_args!("[..]"))
-            .field("tx_wait", &self.tx_wait)
-            .field("tx_count", &self.tx_count)
-            .field("rx_wait", &self.rx_wait)
-            .finish()
     }
 }
 

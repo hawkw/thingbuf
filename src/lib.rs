@@ -19,9 +19,9 @@ feature! {
 
     mod stringbuf;
     pub use stringbuf::{StaticStringBuf, StringBuf};
-
-    pub mod mpsc;
 }
+
+pub mod mpsc;
 
 mod static_thingbuf;
 pub use self::static_thingbuf::StaticThingBuf;
