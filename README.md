@@ -1,3 +1,7 @@
+# thingbuf
+
+> "I'm at the buffer pool. I'm at the MPSC channel. I'm at the combination MPSC
+> channel and buffer pool."
 ## Comparing MPSC Channel Performance
 
 Let's compare `thingbuf::mpsc`'s performance properties with those of other popular
@@ -155,13 +159,18 @@ implementations ([`tokio::sync::mpsc`], [`async_std::channel`], and
 [`thingbuf::mpsc`]: https://docs.rs/thingbuf/latest/thingbuf/mpsc/index.html
 
 The benchmark was performed with the following versions of each crate:
-- `tokio` v1.14.0, with the "parking_lot" feature flag enabled
-- `async-channel` v1.16.1, default feature flags
-- `futures-channel` v0.3.18, default feature flags
+- [`tokio`] v1.14.0, with the "parking_lot" feature flag enabled
+- [`async-channel`] v1.16.1, default feature flags
+- [`futures-channel`] v0.3.18, default feature flags
 
 Each benchmark was run on a separate `tokio` multi-threaded runtime, in
-sequence. This is a description of the benchmark environment:
-```
+sequence.
+
+<details>
+
+<summary>Description of the benchmark environment</summary>
+
+```bash
 :# eliza at noctis in thingbuf
 :; rustc --version
 rustc 1.57.0 (f1edd0429 2021-11-29)
@@ -218,6 +227,8 @@ Flags:                           fpu vme de pse tsc msr pae mce cx8 apic sep mtr
                                  r smca sme sev sev_es
 ```
 
+</details>
+
 ### Analysis
 
 Here's my analysis of this benchmark, plus looking at the implementation of each
@@ -225,7 +236,68 @@ channel tested.
 
 #### `tokio::sync::mpsc`
 
-TODO(eliza): write this part
+[Tokio's MPSC channel][`tokio::sync::mpsc`] stores messages using an [atomic
+linked list of blocks][tokio-ll]. To improve performance, rather than storing
+each individual element in a separate linked list node, each linked list node
+instead contains [an array][tokio-ll2] that can store multiple messages. This
+amortizes the overhead of allocating new nodes, and reduces the link hopping
+necessary to index a message.
+
+This approach means that all the capacity of a bounded MPSC channel is _not_
+allocated up front when the channel is created. If we create a Tokio bounded
+MPSC of capacity 1024, but the channel only has 100 messages in the queue, the
+channel will not currently be occupying enough memory to store 1024 messages.
+This may reduce the average memory use of the application if the channel is
+rarely close to capacity. On the other hand, this has the downside that heap
+allocations may occur as a during any given `send` operation when the channel is
+not at capacity, potentially increasing allocator churn.
+
+Because the linked list is atomic, `send` operations are lock-free when the
+channel has capacity remaining.
+
+Backpressure is implemented using Tokio's [async semaphore] to allow senders to
+wait for channel capacity.[^sem] The async semaphore is implemented using an
+[intrusive] doubly-linked list. In this design, the linked list node is stored
+inside of the future that's waiting to send a message, rather than in a separate
+heap allocation. Critically, this means that once a channel is at capacity,
+additional senders waiting for capacity will _never_ cause additional memory
+allocations; the channel is properly bounded.
+
+The semaphore protects its wait list using a `Mutex`, so waiting does require
+acquiring a lock, although the critical sections of this lock should be quite
+short.
+
+Tokio's MPSC has some other interesting properties that differentiate it from
+some other implementations. It participates in Tokio's task budget system for
+[automatic cooperative yielding][budget], which may improve tail latencies in
+some workloads.[^budget] Also, it has a nice API where senders can [reserve a
+`Permit` type][permit] representing the capacity to send a single message, which
+can be consumed later.
+
+In the benchmark, however, we see that `tokio::sync::mpsc` offers the worst
+throughput at medium (50 senders) and high (100 senders) levels of contention,
+and the second-worst at low (10 senders) contention. This is likely because the
+implementation prioritizes low memory use over low latency.
+
+In general, `tokio::sync::mpsc` is probably a decent choice for channels that are
+long-lived and may have a very large number of tasks waiting for send capacity,
+because the intrusive wait list means that senders waiting for capacity will not
+cause additional memory allocations. While its throughput is poor compared to
+other implementations, if the receiving task performs a lot of work for each
+message, this may not have a major impact.
+
+However, I will also note that `thingbuf`'s MSPC channels _also_ use an
+intrusive wait list and don't require per-waiter allocations, just like Tokio's.
+If a channel with better throughput is needed, `thingbuf`'s MPSC channel may be
+preferable.
+
+Finally, the `tokio` crate does not support `no_std`, with or without `alloc`.
+
+[tokio-ll]: https://github.com/tokio-rs/tokio/blob/78e0f0b42a4f7a50f3986f576703e5a3cb473b79/tokio/src/sync/mpsc/list.rs
+[tokio-ll2]: https://github.com/tokio-rs/tokio/blob/78e0f0b42a4f7a50f3986f576703e5a3cb473b79/tokio/src/sync/mpsc/block.rs#L28-L31
+[async semaphore]: https://github.com/tokio-rs/tokio/blob/78e0f0b42a4f7a50f3986f576703e5a3cb473b79/tokio/src/sync/batch_semaphore.rs
+[budget]: https://tokio.rs/blog/2020-04-preemption
+[permit]: https://docs.rs/tokio/latest/tokio/sync/mpsc/struct.Sender.html#method.reserve
 
 #### `futures-channel`
 
@@ -252,6 +324,9 @@ sound inflammatory, but here's why:
    allocation, and receiving one will always cause a deallocation, resulting in
    increased allocator churn that may impact overall allocator performance.
 
+The [`futures-channel`] crate has limited support for `no_std` (with `alloc`),
+but the MPSC channel is not supported without the standard library.
+
 [`futures`]: https://docs.rs/futures-channel/latest/futures_channel/
 [`futures-channel`]: https://docs.rs/futures-channel/latest/futures_channel/
 [futures-ll1]: https://github.com/rust-lang/futures-rs/blob/master/futures-channel/src/mpsc/queue.rs
@@ -259,7 +334,45 @@ sound inflammatory, but here's why:
 
 #### `async-channel`
 
-TODO(eliza): write this part
+The [`async-std`] library provides bounded and unbounded channels via a
+re-export of the [`async-channel`] crate. This is actually a multi-producer,
+multi-consumer (MPMP) channel, rather than a MPSC channel; I've included it in
+this comparison because [`async-std`] doesn't implement MPSC channels.
+
+Messages sent in the channel [are stored using a bounded lock-free queue][cq1]
+from the [`concurrent-queue`] crate, while the wait queue is implemented using
+the [`event-listener`] crate.[^annoying]
+
+The [`concurrent-queue`] crate's bounded channel implements [Dmitry Vyukov's
+MPMC array-based lock-free queue][vyukov-q]. This is the same algorithm used by
+`thingbuf`. Because this queue uses an array to store messages, a single
+allocation is performed when the channel is constructed; after that, no `send`
+operation will allocate memory as long as the channel has capacity. When there
+is capacity in the channel, `send` operations are lock-free.
+
+[`event-listener`] implements a type of wait queue using a non-intrusive linked
+list. This means that every waiter requires an additional memory allocation.
+Therefore, the channel's maximum memory usage is not actually bounded. Also,
+allocating linked list nodes may cause allocator churn that could impact other
+parts of the system. The linked list is protected by a lock, so waiting requires
+a lock acquisition.
+
+In the benchmark, `async-channel` was the fastest implementation tested in the
+medium (50 senders) and high (100 senders) contention tests, and performed very
+similarly to `thingbuf` in the low contention (10 senders) test. This means that
+it offers very good throughput, and presumably also low latency.
+
+I would consider the use of [`async-channel`] in cases where extremely high
+throughput is vital, but it isn't actually necessary to bound maximum memory
+use (e.g. some other part of the system enforces a limit on the number of
+sending tasks). Outside of microbenchmarks, though, throughput is likely to be
+less of a priority than memory use.
+
+[`async-std`]: https://crates.io/crates/async-std
+[`async-channel`]: https://crates.io/crates/async-channel
+[cq1]: https://github.com/smol-rs/async-channel/blob/eb2b12e50a23ca3624795855aca8eb614a5d7086/src/lib.rs#L47-L48
+[`concurrent-queue`]: https://crates.io/crates/concurrent-queue
+[`event-listener`]: https://crates.io/crates/event-listener
 
 #### `thingbuf::mpsc`
 
@@ -300,14 +413,34 @@ TODO(eliza): write this part
   So, "thingbuf".
 
 [backpressure1]: https://www.tedinski.com/2019/03/05/backpressure.html#its-always-queues-isnt-it
+[sem1]: https://github.com/tokio-rs/tokio/commit/acf8a7da7a64bf08d578db9a9836a8e061765314#diff-f261032a1ebbdd2bf7765bc703d8e6a215ab6d1b9c38423b7b991a824042bf6f
+[intrusive]: https://www.data-structures-in-practice.com/intrusive-linked-lists/
+[`tokio::task::unconstrained`]: https://docs.rs/tokio/latest/tokio/task/fn.unconstrained.html
+[vyukov-q]: https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
+[`Vec`]: https://doc.rust-lang.org/stable/std/vec/struct.Vec.html
+[`Vec::shrink_to_fit`]: https://doc.rust-lang.org/stable/std/vec/struct.Vec.html#method.shrink_to_fit
 
 [^unbounded]: Unless you really, actually know what you're doing. This footnote
 is here because someone on hackernews will probably yell at me unless I include
 a disclaimer telling them that they're a _very special boy_ who's allowed to use
 unbounded queues.
+
 [^vec]: For example, if the channel stores waiting senders in a [`Vec`], and
 never calls [`Vec::shrink_to_fit`] on it, the amount of memory it occupies will
 never go back down as the number of waiters decreases.
+
+[^sem]: I happen to be quite familiar with the implementation details of the
+Tokio semaphore, because [I wrote the initial implementation of it][sem1].
+
+[^sem]: Note, however, that I disabled the task budget system in my benchmark by
+using [`tokio::task::unconstrained`]. Automatic cooperative yielding will
+improve tail latencies in real world systems, but in a benchmark consisting
+_only_ of sending and recieving channel messages, it just means the benchmark
+will spend more time in the task scheduler.
+
 [^vyukov1]: Based on Dmitry Vyukov's [non-intrusive lock-free MPSC
 queue](http://www.1024cores.net/home/lock-free-algorithms/queues/non-intrusive-mpsc-node-based-queue),
 a rather neat lock-free queue algorithm.
+
+[^annoying]: I honestly had kind of a hard time analyzing the implementation of
+`async-std`'s channel because EVERYTHING IS SPLIT ACROSS SO MANY TINY CRATES.
