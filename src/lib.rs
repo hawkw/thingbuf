@@ -10,6 +10,11 @@ mod loom;
 mod util;
 mod wait;
 
+#[cfg_attr(docsrs, doc = include_str!("../mpsc_perf_comparison.md"))]
+pub mod mpsc_perf_comparison {
+    // Empty module, used only for documentation.
+}
+
 feature! {
     #![feature = "alloc"]
     extern crate alloc;
