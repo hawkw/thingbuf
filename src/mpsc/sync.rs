@@ -74,6 +74,9 @@ pub struct Receiver<T> {
 /// # drop(tx); drop(rx);
 /// }
 /// ```
+///
+/// [async]: crate::mpsc::StaticChannel
+/// [`split`]: StaticChannel::split
 pub struct StaticChannel<T, const CAPACITY: usize> {
     core: ChannelCore<Thread>,
     slots: [Slot<T>; CAPACITY],
@@ -143,6 +146,9 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
     /// # drop(tx); drop(rx);
     /// }
     /// ```
+    ///
+    /// [async]: crate::mpsc::StaticChannel
+    /// [`split`]: StaticChannel::split
     #[cfg(not(all(loom, test)))]
     pub const fn new() -> Self {
         Self {

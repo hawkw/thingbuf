@@ -78,6 +78,7 @@ feature! {
 /// # drop(tx); drop(rx);
 /// }
 /// ```
+/// [`split`]: StaticChannel::split
 pub struct StaticChannel<T, const CAPACITY: usize> {
     core: ChannelCore<Waker>,
     slots: [Slot<T>; CAPACITY],
@@ -118,6 +119,8 @@ pub struct RecvRefFuture<'a, T> {
 /// This is equivalent to the [`RecvRefFuture`] future, but the value is moved out of
 /// the [`ThingBuf`] after it is received. This means that allocations are not
 /// reused.
+///
+/// [`ThingBuf`]: crate::ThingBuf
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct RecvFuture<'a, T> {
     core: &'a ChannelCore<Waker>,
@@ -175,6 +178,7 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
     /// # drop(tx); drop(rx);
     /// }
     /// ```
+    /// [`split`]: StaticChannel::split
     #[cfg(not(all(loom, test)))]
     pub const fn new() -> Self {
         Self {
