@@ -25,8 +25,8 @@ aaaaaaaaaaaaaa";
             &senders,
             |b, &senders| {
                 b.to_async(rt()).iter(|| async {
-                    use thingbuf::{mpsc, ThingBuf};
-                    let (tx, rx) = mpsc::channel(ThingBuf::<String>::new(CAPACITY));
+                    use thingbuf::mpsc;
+                    let (tx, rx) = mpsc::channel::<String>(CAPACITY);
                     for _ in 0..senders {
                         let tx = tx.clone();
                         task::spawn(async move {
@@ -149,8 +149,8 @@ fn bench_mpsc_integer(c: &mut Criterion) {
             &senders,
             |b, &senders| {
                 b.to_async(rt()).iter(|| async {
-                    use thingbuf::{mpsc, ThingBuf};
-                    let (tx, rx) = mpsc::channel(ThingBuf::new(CAPACITY));
+                    use thingbuf::mpsc;
+                    let (tx, rx) = mpsc::channel::<i32>(CAPACITY);
                     for i in 0..senders {
                         let tx = tx.clone();
                         task::spawn(async move {

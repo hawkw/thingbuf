@@ -1,22 +1,13 @@
-#[cfg(all(test, loom))]
-use crate::loom::sync::Mutex as Inner;
-#[cfg(all(test, loom))]
 pub(crate) use crate::loom::sync::MutexGuard;
-
-#[cfg(not(all(test, loom)))]
-use std::sync::Mutex as Inner;
-
-#[cfg(not(all(test, loom)))]
-pub(crate) use std::sync::MutexGuard;
 
 use std::sync::PoisonError;
 
 #[derive(Debug)]
-pub(crate) struct Mutex<T>(Inner<T>);
+pub(crate) struct Mutex<T>(crate::loom::sync::Mutex<T>);
 
 impl<T> Mutex<T> {
     pub(crate) fn new(data: T) -> Self {
-        Self(Inner::new(data))
+        Self(crate::loom::sync::Mutex::new(data))
     }
 
     #[inline]

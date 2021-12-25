@@ -13,11 +13,9 @@
 use crate::{
     loom::{atomic::AtomicUsize, hint},
     wait::{Notify, WaitCell, WaitQueue, WaitResult},
-    Ref, ThingBuf,
+    Core, Ref, Slot,
 };
-use core::fmt;
-use core::pin::Pin;
-use core::task::Poll;
+use core::{fmt, ops::Index, task::Poll};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -30,8 +28,8 @@ pub enum TrySendError<T = ()> {
 pub struct Closed<T = ()>(T);
 
 #[derive(Debug)]
-struct Inner<T, N: Notify> {
-    thingbuf: ThingBuf<T>,
+struct ChannelCore<N> {
+    core: Core,
     rx_wait: WaitCell<N>,
     tx_count: AtomicUsize,
     tx_wait: WaitQueue<N>,
@@ -72,18 +70,34 @@ impl TrySendError {
 }
 
 // ==== impl Inner ====
-impl<T, N: Notify + Unpin> Inner<T, N> {
-    fn new(thingbuf: ThingBuf<T>) -> Self {
+impl<N> ChannelCore<N> {
+    #[cfg(not(loom))]
+    const fn new(capacity: usize) -> Self {
         Self {
-            thingbuf,
+            core: Core::new(capacity),
             rx_wait: WaitCell::new(),
             tx_count: AtomicUsize::new(1),
             tx_wait: WaitQueue::new(),
         }
     }
 
+    #[cfg(loom)]
+    fn new(capacity: usize) -> Self {
+        Self {
+            core: Core::new(capacity),
+            rx_wait: WaitCell::new(),
+            tx_count: AtomicUsize::new(1),
+            tx_wait: WaitQueue::new(),
+        }
+    }
+}
+
+impl<N> ChannelCore<N>
+where
+    N: Notify + Unpin,
+{
     fn close_rx(&self) {
-        if self.thingbuf.core.close() {
+        if self.core.close() {
             crate::loom::hint::spin_loop();
             test_println!("draining_queue");
             self.tx_wait.close();
@@ -91,19 +105,28 @@ impl<T, N: Notify + Unpin> Inner<T, N> {
     }
 }
 
-impl<T: Default, N: Notify + Unpin> Inner<T, N> {
-    fn try_send_ref(&self) -> Result<SendRefInner<'_, T, N>, TrySendError> {
-        self.thingbuf
-            .core
-            .push_ref(self.thingbuf.slots.as_ref())
-            .map(|slot| SendRefInner {
-                _notify: NotifyRx(&self.rx_wait),
-                slot,
-            })
+impl<N> ChannelCore<N>
+where
+    N: Notify + Unpin,
+{
+    fn try_send_ref<'a, T>(
+        &'a self,
+        slots: &'a [Slot<T>],
+    ) -> Result<SendRefInner<'a, T, N>, TrySendError>
+    where
+        T: Default,
+    {
+        self.core.push_ref(slots).map(|slot| SendRefInner {
+            _notify: NotifyRx(&self.rx_wait),
+            slot,
+        })
     }
 
-    fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
-        match self.try_send_ref() {
+    fn try_send<T>(&self, slots: &[Slot<T>], val: T) -> Result<(), TrySendError<T>>
+    where
+        T: Default,
+    {
+        match self.try_send_ref(slots) {
             Ok(mut slot) => {
                 slot.with_mut(|slot| *slot = val);
                 Ok(())
@@ -117,11 +140,19 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
     /// The loop itself has to be written in the actual `send` method's
     /// implementation, rather than on `inner`, because it might be async and
     /// may yield, or might park the thread.
-    fn poll_recv_ref(&self, mk_waiter: impl Fn() -> N) -> Poll<Option<Ref<'_, T>>> {
+    fn poll_recv_ref<'a, T, S>(
+        &'a self,
+        slots: &'a S,
+        mk_waiter: impl Fn() -> N,
+    ) -> Poll<Option<Ref<'a, T>>>
+    where
+        S: Index<usize, Output = Slot<T>> + ?Sized,
+        T: Default,
+    {
         macro_rules! try_poll_recv {
             () => {
                 // If we got a value, return it!
-                match self.thingbuf.core.pop_ref(self.thingbuf.slots.as_ref()) {
+                match self.core.pop_ref(slots) {
                     Ok(slot) => return Poll::Ready(Some(slot)),
                     Err(TrySendError::Closed(_)) => return Poll::Ready(None),
                     _ => {}
@@ -151,7 +182,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
                     // the channel is closed (all the receivers are dropped).
                     // however, there may be messages left in the queue. try
                     // popping from the queue until it's empty.
-                    return Poll::Ready(self.thingbuf.pop_ref());
+                    return Poll::Ready(self.core.pop_ref(slots).ok());
                 }
                 WaitResult::Notified => {
                     // we were notified while we were trying to register the
@@ -162,6 +193,8 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
         }
     }
 }
+
+// === impl SendRefInner ===
 
 impl<T, N: Notify> core::ops::Deref for SendRefInner<'_, T, N> {
     type Target = T;

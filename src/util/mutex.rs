@@ -1,17 +1,17 @@
-feature! {
-    #![all(feature = "std", not(feature = "parking_lot"))]
-    pub(crate) use self::std_impl::*;
-    mod std_impl;
-}
-
-#[cfg(not(feature = "std"))]
+#[cfg(not(any(feature = "std", all(loom, test))))]
 pub(crate) use self::spin_impl::*;
 
 #[cfg(any(not(feature = "std"), test))]
 mod spin_impl;
 
 feature! {
-    #![all(feature = "std", feature = "parking_lot")]
+    #![all(feature = "std", not(all(loom, test)))]
     #[allow(unused_imports)]
-    pub(crate) use parking_lot::{Mutex, MutexGuard};
+    pub(crate) use parking_lot::{Mutex, MutexGuard, const_mutex};
+}
+
+feature! {
+    #![all(loom, test)]
+    mod loom_impl;
+    pub(crate) use self::loom_impl::*;
 }

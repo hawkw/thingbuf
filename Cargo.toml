@@ -12,13 +12,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-std = ["alloc"]
+std = ["alloc", "parking_lot"]
 alloc = []
 default = ["std"]
 
 [dependencies]
 pin-project = "1"
-parking_lot = { version = "0.11", optional = true }
+parking_lot = { version = "0.11", optional = true, default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }

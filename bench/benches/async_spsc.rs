@@ -22,11 +22,9 @@ aaaaaaaaaaaaaa";
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             let rt = runtime::Builder::new_current_thread().build().unwrap();
             b.to_async(rt).iter(|| async {
-                use thingbuf::{
-                    mpsc::{self, TrySendError},
-                    ThingBuf,
-                };
-                let (tx, rx) = mpsc::channel(ThingBuf::<String>::new(100));
+                use thingbuf::mpsc::{self, TrySendError};
+
+                let (tx, rx) = mpsc::channel::<String>(100);
                 task::spawn(async move {
                     loop {
                         match tx.try_send_ref() {
@@ -158,8 +156,8 @@ aaaaaaaaaaaaaa";
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             let rt = runtime::Builder::new_current_thread().build().unwrap();
             b.to_async(rt).iter(|| async {
-                use thingbuf::{mpsc, ThingBuf};
-                let (tx, rx) = mpsc::channel(ThingBuf::<String>::new(100));
+                use thingbuf::mpsc;
+                let (tx, rx) = mpsc::channel::<String>(100);
                 task::spawn(async move {
                     while let Ok(mut slot) = tx.send_ref().await {
                         slot.clear();
@@ -267,11 +265,8 @@ fn bench_spsc_try_send_integer(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             let rt = runtime::Builder::new_current_thread().build().unwrap();
             b.to_async(rt).iter(|| async {
-                use thingbuf::{
-                    mpsc::{self, TrySendError},
-                    ThingBuf,
-                };
-                let (tx, rx) = mpsc::channel(ThingBuf::new(100));
+                use thingbuf::mpsc::{self, TrySendError};
+                let (tx, rx) = mpsc::channel(100);
                 task::spawn(async move {
                     let mut i = 0;
                     loop {
