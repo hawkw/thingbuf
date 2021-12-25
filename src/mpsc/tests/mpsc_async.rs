@@ -266,7 +266,7 @@ fn tx_close_wakes() {
 fn tx_close_drains_queue() {
     const LEN: usize = 4;
     loom::model(|| {
-        let (tx, rx) = channel(ThingBuf::new(LEN));
+        let (tx, rx) = channel(LEN);
         let producer = thread::spawn(move || {
             future::block_on(async move {
                 for i in 0..LEN {
