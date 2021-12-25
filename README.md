@@ -293,6 +293,7 @@ preferable.
 
 Finally, the `tokio` crate does not support `no_std`, with or without `alloc`.
 
+[`tokio`]: https://tokio.rs
 [tokio-ll]: https://github.com/tokio-rs/tokio/blob/78e0f0b42a4f7a50f3986f576703e5a3cb473b79/tokio/src/sync/mpsc/list.rs
 [tokio-ll2]: https://github.com/tokio-rs/tokio/blob/78e0f0b42a4f7a50f3986f576703e5a3cb473b79/tokio/src/sync/mpsc/block.rs#L28-L31
 [async semaphore]: https://github.com/tokio-rs/tokio/blob/78e0f0b42a4f7a50f3986f576703e5a3cb473b79/tokio/src/sync/batch_semaphore.rs
@@ -368,6 +369,8 @@ use (e.g. some other part of the system enforces a limit on the number of
 sending tasks). Outside of microbenchmarks, though, throughput is likely to be
 less of a priority than memory use.
 
+`async-channel` does not support `no_std`, with or without `alloc`.
+ 
 [`async-std`]: https://crates.io/crates/async-std
 [`async-channel`]: https://crates.io/crates/async-channel
 [cq1]: https://github.com/smol-rs/async-channel/blob/eb2b12e50a23ca3624795855aca8eb614a5d7086/src/lib.rs#L47-L48
