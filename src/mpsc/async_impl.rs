@@ -48,6 +48,36 @@ feature! {
     }
 }
 
+/// A statically-allocated, asynchronous bounded MPSC channel.
+///
+/// A statically-allocated channel allows using a MPSC channel without
+/// requiring _any_ heap allocations, and can be used in environments that
+/// don't support `liballoc`.
+///
+/// In order to use a statically-allocated channel, a `StaticChannel` must
+/// be constructed in a `static` initializer. This reserves storage for the
+/// channel's message queue at compile-time. Then, at runtime, the channel
+/// is [`split`] into a [`StaticSender`]/[`StaticReceiver`] pair in order to
+/// be used.
+///
+/// # Examples
+///
+/// ```
+/// use thingbuf::mpsc::StaticChannel;
+///
+/// // Construct a statically-allocated channel of `usize`s with a capacity
+/// // of 16 messages.
+/// static MY_CHANNEL: StaticChannel<usize, 16> = StaticChannel::new();
+///
+/// fn main() {
+///     // Split the `StaticChannel` into a sender-receiver pair.
+///     let (tx, rx) = MY_CHANNEL.split();
+///
+///     // Now, `tx` and `rx` can be used just like any other async MPSC
+///     // channel...
+/// # drop(tx); drop(rx);
+/// }
+/// ```
 pub struct StaticChannel<T, const CAPACITY: usize> {
     core: ChannelCore<Waker>,
     slots: [Slot<T>; CAPACITY],
@@ -114,6 +144,37 @@ enum State {
 
 impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
     const SLOT: Slot<T> = Slot::empty();
+
+    /// Constructs a new statically-allocated, asynchronous bounded MPSC channel.
+    ///
+    /// A statically-allocated channel allows using a MPSC channel without
+    /// requiring _any_ heap allocations, and can be used in environments that
+    /// don't support `liballoc`.
+    ///
+    /// In order to use a statically-allocated channel, a `StaticChannel` must
+    /// be constructed in a `static` initializer. This reserves storage for the
+    /// channel's message queue at compile-time. Then, at runtime, the channel
+    /// is [`split`] into a [`StaticSender`]/[`StaticReceiver`] pair in order to
+    /// be used.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::StaticChannel;
+    ///
+    /// // Construct a statically-allocated channel of `usize`s with a capacity
+    /// // of 16 messages.
+    /// static MY_CHANNEL: StaticChannel<usize, 16> = StaticChannel::new();
+    ///
+    /// fn main() {
+    ///     // Split the `StaticChannel` into a sender-receiver pair.
+    ///     let (tx, rx) = MY_CHANNEL.split();
+    ///
+    ///     // Now, `tx` and `rx` can be used just like any other async MPSC
+    ///     // channel...
+    /// # drop(tx); drop(rx);
+    /// }
+    /// ```
     #[cfg(not(all(loom, test)))]
     pub const fn new() -> Self {
         Self {
@@ -123,10 +184,27 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
         }
     }
 
+    /// Split a [`StaticChannel`] into a [`StaticSender`]/[`StaticReceiver`]
+    /// pair.
+    ///
+    /// A static channel can only be split a single time. If
+    /// [`StaticChannel::split`] or [`StaticChannel::try_split`] have been
+    /// called previously, this method will panic. For a non-panicking version
+    /// of this method, see [`StaticChannel::try_split`].
+    ///
+    /// # Panics
+    ///
+    /// If the channel has already been split.
     pub fn split(&'static self) -> (StaticSender<T>, StaticReceiver<T>) {
         self.try_split().expect("channel already split")
     }
 
+    /// Try to split a [`StaticChannel`] into a [`StaticSender`]/[`StaticReceiver`]
+    /// pair, returning `None` if it has already been split.
+    ///
+    /// A static channel can only be split a single time. If
+    /// [`StaticChannel::split`] or [`StaticChannel::try_split`] have been
+    /// called previously, this method returns `None`.
     pub fn try_split(&'static self) -> Option<(StaticSender<T>, StaticReceiver<T>)> {
         self.is_split
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
