@@ -492,6 +492,7 @@ impl<T> Waiter<T> {
     /// parameter ensures this method is only called while holding the lock, so
     /// this can be safe.
     #[inline(always)]
+    #[cfg_attr(loom, track_caller)]
     fn with_node<U>(&self, _list: &mut List<T>, f: impl FnOnce(&mut Node<T>) -> U) -> U {
         self.node.with_mut(|node| unsafe {
             // Safety: the dummy `_list` argument ensures that the caller has
@@ -503,6 +504,7 @@ impl<T> Waiter<T> {
     /// # Safety
     ///
     /// This is only safe to call while the list is locked.
+    #[cfg_attr(loom, track_caller)]
     unsafe fn set_prev(&mut self, prev: Option<NonNull<Waiter<T>>>) {
         self.node.with_mut(|node| (*node).prev = prev);
     }
@@ -510,6 +512,7 @@ impl<T> Waiter<T> {
     /// # Safety
     ///
     /// This is only safe to call while the list is locked.
+    #[cfg_attr(loom, track_caller)]
     unsafe fn take_prev(&mut self) -> Option<NonNull<Waiter<T>>> {
         self.node.with_mut(|node| (*node).prev.take())
     }
@@ -517,6 +520,7 @@ impl<T> Waiter<T> {
     /// # Safety
     ///
     /// This is only safe to call while the list is locked.
+    #[cfg_attr(loom, track_caller)]
     unsafe fn take_next(&mut self) -> Option<NonNull<Waiter<T>>> {
         self.node.with_mut(|node| (*node).next.take())
     }
