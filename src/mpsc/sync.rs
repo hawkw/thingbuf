@@ -108,6 +108,7 @@ impl_recv_ref! {
 
 // === impl StaticChannel ===
 
+#[cfg(not(all(loom, test)))]
 impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
     const SLOT: Slot<T> = Slot::empty();
 
@@ -149,7 +150,6 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
     ///
     /// [async]: crate::mpsc::StaticChannel
     /// [`split`]: StaticChannel::split
-    #[cfg(not(all(loom, test)))]
     pub const fn new() -> Self {
         Self {
             core: ChannelCore::new(CAPACITY),
