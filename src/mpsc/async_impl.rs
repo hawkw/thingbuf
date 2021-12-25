@@ -11,12 +11,6 @@ use core::{
     task::{Context, Poll, Waker},
 };
 
-pub struct StaticChannel<T, const CAPACITY: usize> {
-    core: ChannelCore<Waker>,
-    slots: [Slot<T>; CAPACITY],
-    is_split: AtomicBool,
-}
-
 feature! {
     #![feature = "alloc"]
 
@@ -52,6 +46,12 @@ feature! {
         core: super::ChannelCore<Waker>,
         slots: Box<[Slot<T>]>,
     }
+}
+
+pub struct StaticChannel<T, const CAPACITY: usize> {
+    core: ChannelCore<Waker>,
+    slots: [Slot<T>; CAPACITY],
+    is_split: AtomicBool,
 }
 
 pub struct StaticSender<T: 'static> {
@@ -142,6 +142,7 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
         Some((tx, rx))
     }
 }
+
 // === impl Sender ===
 
 #[cfg(feature = "alloc")]
@@ -322,6 +323,15 @@ impl<T> Drop for StaticSender<T> {
     }
 }
 
+impl<T> fmt::Debug for StaticSender<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaticSender")
+            .field("core", &self.core)
+            .field("slots", &format_args!("&[..]"))
+            .finish()
+    }
+}
+
 // === impl StaticReceiver ===
 
 impl<T: Default> StaticReceiver<T> {
@@ -382,6 +392,15 @@ impl<T: Default> StaticReceiver<T> {
 impl<T> Drop for StaticReceiver<T> {
     fn drop(&mut self) {
         self.core.close_rx();
+    }
+}
+
+impl<T> fmt::Debug for StaticReceiver<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaticReceiver")
+            .field("core", &self.core)
+            .field("slots", &format_args!("&[..]"))
+            .finish()
     }
 }
 
