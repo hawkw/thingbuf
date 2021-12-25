@@ -281,7 +281,6 @@ fn tx_close_drains_queue() {
             }
         });
 
-
         producer.join().unwrap();
     });
 }
