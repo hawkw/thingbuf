@@ -19,6 +19,14 @@ pub(crate) struct MutexGuard<'lock, T> {
     data: MutPtr<T>,
 }
 
+#[cfg(not(loom))]
+pub(crate) const fn const_mutex<T>(data: T) -> Mutex<T> {
+    Mutex {
+        locked: AtomicBool::new(false),
+        data: UnsafeCell::new(data),
+    }
+}
+
 impl<T> Mutex<T> {
     pub(crate) fn new(data: T) -> Self {
         Self {

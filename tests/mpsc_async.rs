@@ -1,4 +1,4 @@
-use thingbuf::{mpsc, ThingBuf};
+use thingbuf::mpsc;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn basically_works() {
@@ -18,7 +18,7 @@ async fn basically_works() {
         println!("PRODUCER {} DONE!", n);
     }
 
-    let (tx, rx) = mpsc::channel(ThingBuf::new(N_SENDS / 2));
+    let (tx, rx) = mpsc::channel(N_SENDS / 2);
     for n in 0..N_PRODUCERS {
         tokio::spawn(do_producer(tx.clone(), n));
     }

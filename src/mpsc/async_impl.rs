@@ -5,7 +5,7 @@ use crate::{
         sync::Arc,
     },
     wait::queue,
-    Ref, ThingBuf,
+    Ref,
 };
 use core::{
     fmt,
@@ -15,8 +15,10 @@ use core::{
 };
 
 /// Returns a new synchronous multi-producer, single consumer channel.
-pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
-    let inner = Arc::new(Inner::new(thingbuf));
+pub fn channel<T: Default>(capacity: usize) -> (Sender<T>, Receiver<T>) {
+    assert!(capacity > 0);
+    let slots = (0..capacity).map(|_| Slot::empty()).collect();
+    let inner = Arc::new(Inner::new(Core::new(capacity), slots));
     let tx = Sender {
         inner: inner.clone(),
     };
@@ -24,14 +26,16 @@ pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
     (tx, rx)
 }
 
+type Inner<T> = super::Inner<T, Box<[Slot<T>]>, Waker>;
+
 #[derive(Debug)]
 pub struct Sender<T> {
-    inner: Arc<Inner<T, Waker>>,
+    inner: Arc<Inner<T>>,
 }
 
 #[derive(Debug)]
 pub struct Receiver<T> {
-    inner: Arc<Inner<T, Waker>>,
+    inner: Arc<Inner<T>>,
 }
 
 impl_send_ref! {
@@ -199,7 +203,7 @@ impl<T> Drop for Sender<T> {
 
         // if we are the last sender, synchronize
         test_dbg!(atomic::fence(Ordering::SeqCst));
-        self.inner.thingbuf.core.close();
+        self.inner.core.close();
         self.inner.rx_wait.close_tx();
     }
 }
@@ -289,7 +293,6 @@ impl<'a, T: Default> Future for RecvFuture<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ThingBuf;
 
     fn _assert_sync<T: Sync>(_: T) {}
     fn _assert_send<T: Send>(_: T) {}
@@ -297,7 +300,7 @@ mod tests {
     #[test]
     fn recv_ref_future_is_send() {
         fn _compiles() {
-            let (_, rx) = channel::<usize>(ThingBuf::new(10));
+            let (_, rx) = channel::<usize>(10);
             _assert_send(rx.recv_ref());
         }
     }
@@ -305,7 +308,7 @@ mod tests {
     #[test]
     fn recv_ref_future_is_sync() {
         fn _compiles() {
-            let (_, rx) = channel::<usize>(ThingBuf::new(10));
+            let (_, rx) = channel::<usize>(10);
             _assert_sync(rx.recv_ref());
         }
     }
@@ -313,7 +316,7 @@ mod tests {
     #[test]
     fn send_ref_future_is_send() {
         fn _compiles() {
-            let (tx, _) = channel::<usize>(ThingBuf::new(10));
+            let (tx, _) = channel::<usize>(10);
             _assert_send(tx.send_ref());
         }
     }
@@ -321,7 +324,7 @@ mod tests {
     #[test]
     fn send_ref_future_is_sync() {
         fn _compiles() {
-            let (tx, _) = channel::<usize>(ThingBuf::new(10));
+            let (tx, _) = channel::<usize>(10);
             _assert_sync(tx.send_ref());
         }
     }

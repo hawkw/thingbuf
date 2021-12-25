@@ -1,9 +1,3 @@
-feature! {
-    #![all(feature = "std", not(feature = "parking_lot"))]
-    pub(crate) use self::std_impl::*;
-    mod std_impl;
-}
-
 #[cfg(not(feature = "std"))]
 pub(crate) use self::spin_impl::*;
 
@@ -11,7 +5,7 @@ pub(crate) use self::spin_impl::*;
 mod spin_impl;
 
 feature! {
-    #![all(feature = "std", feature = "parking_lot")]
+    #![feature = "std"]
     #[allow(unused_imports)]
-    pub(crate) use parking_lot::{Mutex, MutexGuard};
+    pub(crate) use parking_lot::{Mutex, MutexGuard, const_mutex};
 }

@@ -3,7 +3,10 @@ use crate::{
         atomic::{AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
-    util::{mutex::Mutex, CachePadded},
+    util::{
+        mutex::{self, Mutex},
+        CachePadded,
+    },
     wait::{Notify, WaitResult},
 };
 
@@ -156,7 +159,8 @@ const WAITING: usize = 1;
 const WAKING: usize = 2;
 const CLOSED: usize = 3;
 
-impl<T: Notify + Unpin> WaitQueue<T> {
+impl<T> WaitQueue<T> {
+    #[cfg(loom)]
     pub(crate) fn new() -> Self {
         Self {
             state: CachePadded(AtomicUsize::new(EMPTY)),
@@ -164,6 +168,16 @@ impl<T: Notify + Unpin> WaitQueue<T> {
         }
     }
 
+    #[cfg(not(loom))]
+    pub(crate) const fn new() -> Self {
+        Self {
+            state: CachePadded(AtomicUsize::new(EMPTY)),
+            list: mutex::const_mutex(List::new()),
+        }
+    }
+}
+
+impl<T: Notify + Unpin> WaitQueue<T> {
     /// Start waiting for a notification.
     ///
     /// If the queue has a stored notification, this consumes it and returns
@@ -514,7 +528,7 @@ unsafe impl<T: Send> Sync for Waiter<T> {}
 // === impl List ===
 
 impl<T> List<T> {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             head: None,
             tail: None,

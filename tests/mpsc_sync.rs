@@ -1,5 +1,5 @@
 use std::thread;
-use thingbuf::{mpsc::sync, ThingBuf};
+use thingbuf::mpsc::sync;
 
 #[test]
 fn basically_works() {
@@ -24,7 +24,7 @@ fn basically_works() {
             .expect("spawning threads should succeed")
     }
 
-    let (tx, rx) = sync::channel(ThingBuf::new(N_SENDS / 2));
+    let (tx, rx) = sync::channel(N_SENDS / 2);
     for n in 0..N_PRODUCERS {
         start_producer(tx.clone(), n);
     }
@@ -56,7 +56,7 @@ fn tx_close_drains_queue() {
     for i in 0..10000 {
         println!("\n\n--- iteration {} ---\n\n", i);
 
-        let (tx, rx) = sync::channel(ThingBuf::new(LEN));
+        let (tx, rx) = sync::channel(LEN);
         let producer = thread::spawn(move || {
             for i in 0..LEN {
                 tx.send(i).unwrap();

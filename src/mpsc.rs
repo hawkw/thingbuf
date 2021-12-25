@@ -13,11 +13,9 @@
 use crate::{
     loom::{atomic::AtomicUsize, hint},
     wait::{Notify, WaitCell, WaitQueue, WaitResult},
-    Ref, ThingBuf,
+    Core, Ref, Slot,
 };
-use core::fmt;
-use core::pin::Pin;
-use core::task::Poll;
+use core::{fmt, marker::PhantomData, pin::Pin, task::Poll};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -29,12 +27,13 @@ pub enum TrySendError<T = ()> {
 #[derive(Debug)]
 pub struct Closed<T = ()>(T);
 
-#[derive(Debug)]
-struct Inner<T, N: Notify> {
-    thingbuf: ThingBuf<T>,
+struct Inner<T, S, N> {
+    core: Core,
+    slots: S,
     rx_wait: WaitCell<N>,
     tx_count: AtomicUsize,
     tx_wait: WaitQueue<N>,
+    _val: PhantomData<T>,
 }
 
 struct SendRefInner<'a, T, N: Notify> {
@@ -72,18 +71,38 @@ impl TrySendError {
 }
 
 // ==== impl Inner ====
-impl<T, N: Notify + Unpin> Inner<T, N> {
-    fn new(thingbuf: ThingBuf<T>) -> Self {
+impl<T, S, N> Inner<T, S, N> {
+    #[cfg(not(loom))]
+    const fn new(core: Core, slots: S) -> Self {
         Self {
-            thingbuf,
+            core,
+            slots,
             rx_wait: WaitCell::new(),
             tx_count: AtomicUsize::new(1),
             tx_wait: WaitQueue::new(),
+            _val: PhantomData,
         }
     }
 
+    #[cfg(loom)]
+    fn new(core: Core, slots: S) -> Self {
+        Self {
+            core,
+            slots,
+            rx_wait: WaitCell::new(),
+            tx_count: AtomicUsize::new(1),
+            tx_wait: WaitQueue::new(),
+            _val: PhantomData,
+        }
+    }
+}
+
+impl<S, T, N> Inner<S, T, N>
+where
+    N: Notify + Unpin,
+{
     fn close_rx(&self) {
-        if self.thingbuf.core.close() {
+        if self.core.close() {
             crate::loom::hint::spin_loop();
             test_println!("draining_queue");
             self.tx_wait.close();
@@ -91,11 +110,15 @@ impl<T, N: Notify + Unpin> Inner<T, N> {
     }
 }
 
-impl<T: Default, N: Notify + Unpin> Inner<T, N> {
+impl<T, S, N> Inner<T, S, N>
+where
+    S: AsRef<[Slot<T>]>,
+    T: Default,
+    N: Notify + Unpin,
+{
     fn try_send_ref(&self) -> Result<SendRefInner<'_, T, N>, TrySendError> {
-        self.thingbuf
-            .core
-            .push_ref(self.thingbuf.slots.as_ref())
+        self.core
+            .push_ref(self.slots.as_ref())
             .map(|slot| SendRefInner {
                 _notify: NotifyRx(&self.rx_wait),
                 slot,
@@ -121,7 +144,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
         macro_rules! try_poll_recv {
             () => {
                 // If we got a value, return it!
-                match self.thingbuf.core.pop_ref(self.thingbuf.slots.as_ref()) {
+                match self.core.pop_ref(self.slots.as_ref()) {
                     Ok(slot) => return Poll::Ready(Some(slot)),
                     Err(TrySendError::Closed(_)) => return Poll::Ready(None),
                     _ => {}
@@ -151,7 +174,7 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
                     // the channel is closed (all the receivers are dropped).
                     // however, there may be messages left in the queue. try
                     // popping from the queue until it's empty.
-                    return Poll::Ready(self.thingbuf.pop_ref());
+                    return Poll::Ready(self.core.pop_ref(self.slots.as_ref()).ok());
                 }
                 WaitResult::Notified => {
                     // we were notified while we were trying to register the
@@ -162,6 +185,20 @@ impl<T: Default, N: Notify + Unpin> Inner<T, N> {
         }
     }
 }
+
+impl<S, T, N: Notify> fmt::Debug for Inner<S, T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("mpsc::Inner")
+            .field("core", &self.core)
+            .field("slots", &format_args!("[..]"))
+            .field("tx_wait", &self.tx_wait)
+            .field("tx_count", &self.tx_count)
+            .field("rx_wait", &self.rx_wait)
+            .finish()
+    }
+}
+
+// === impl SendRefInner ===
 
 impl<T, N: Notify> core::ops::Deref for SendRefInner<'_, T, N> {
     type Target = T;

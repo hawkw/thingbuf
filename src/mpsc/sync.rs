@@ -11,13 +11,14 @@ use crate::{
         thread::{self, Thread},
     },
     wait::queue,
-    Ref, ThingBuf,
+    Ref,
 };
 use core::fmt;
 
 /// Returns a new asynchronous multi-producer, single consumer channel.
-pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
-    let inner = Arc::new(Inner::new(thingbuf));
+pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
+    let slots = (0..capacity).map(|_| Slot::empty()).collect();
+    let inner = Arc::new(Inner::new(Core::new(capacity), slots));
     let tx = Sender {
         inner: inner.clone(),
     };
@@ -25,14 +26,16 @@ pub fn channel<T>(thingbuf: ThingBuf<T>) -> (Sender<T>, Receiver<T>) {
     (tx, rx)
 }
 
+type Inner<T> = super::Inner<T, Box<[Slot<T>]>, Thread>;
+
 #[derive(Debug)]
 pub struct Sender<T> {
-    inner: Arc<Inner<T, Thread>>,
+    inner: Arc<Inner<T>>,
 }
 
 #[derive(Debug)]
 pub struct Receiver<T> {
-    inner: Arc<Inner<T, Thread>>,
+    inner: Arc<Inner<T>>,
 }
 
 impl_send_ref! {
@@ -123,7 +126,7 @@ impl<T> Drop for Sender<T> {
 
         // if we are the last sender, synchronize
         test_dbg!(atomic::fence(Ordering::SeqCst));
-        if self.inner.thingbuf.core.close() {
+        if self.inner.core.close() {
             self.inner.rx_wait.close_tx();
         }
     }
@@ -147,10 +150,6 @@ impl<T: Default> Receiver<T> {
                 }
             }
         }
-    }
-
-    pub fn try_recv_ref(&self) -> Option<Ref<'_, T>> {
-        self.inner.thingbuf.pop_ref()
     }
 
     pub fn recv(&self) -> Option<T> {
