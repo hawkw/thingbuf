@@ -6,27 +6,28 @@
 use super::*;
 use crate::{
     loom::{
-        atomic::{self, Ordering},
+        atomic::{self, AtomicBool, Ordering},
         sync::Arc,
         thread::{self, Thread},
     },
     wait::queue,
     Ref,
 };
-use core::fmt;
+use core::{fmt, pin::Pin};
 
 /// Returns a new asynchronous multi-producer, single consumer channel.
 pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     let slots = (0..capacity).map(|_| Slot::empty()).collect();
-    let inner = Arc::new(Inner::new(Core::new(capacity), slots));
+    let inner = Arc::new(Inner {
+        core: ChannelCore::new(capacity),
+        slots,
+    });
     let tx = Sender {
         inner: inner.clone(),
     };
     let rx = Receiver { inner };
     (tx, rx)
 }
-
-type Inner<T> = super::Inner<T, Box<[Slot<T>]>, Thread>;
 
 #[derive(Debug)]
 pub struct Sender<T> {
@@ -38,6 +39,27 @@ pub struct Receiver<T> {
     inner: Arc<Inner<T>>,
 }
 
+pub struct StaticChannel<T, const CAPACITY: usize> {
+    core: ChannelCore<Thread>,
+    slots: [Slot<T>; CAPACITY],
+    is_split: AtomicBool,
+}
+
+pub struct StaticSender<T: 'static> {
+    core: &'static ChannelCore<Thread>,
+    slots: &'static [Slot<T>],
+}
+
+pub struct StaticReceiver<T: 'static> {
+    core: &'static ChannelCore<Thread>,
+    slots: &'static [Slot<T>],
+}
+
+struct Inner<T> {
+    core: super::ChannelCore<Thread>,
+    slots: Box<[Slot<T>]>,
+}
+
 impl_send_ref! {
     pub struct SendRef<Thread>;
 }
@@ -46,56 +68,55 @@ impl_recv_ref! {
     pub struct RecvRef<Thread>;
 }
 
+// === impl StaticChannel ===
+
+impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
+    const SLOT: Slot<T> = Slot::empty();
+    #[cfg(not(all(loom, test)))]
+    pub const fn new() -> Self {
+        Self {
+            core: ChannelCore::new(CAPACITY),
+            slots: [Self::SLOT; CAPACITY],
+            is_split: AtomicBool::new(false),
+        }
+    }
+
+    pub fn split(&'static self) -> (StaticSender<T>, StaticReceiver<T>) {
+        self.try_split().expect("channel already split")
+    }
+
+    pub fn try_split(&'static self) -> Option<(StaticSender<T>, StaticReceiver<T>)> {
+        self.is_split
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()?;
+        let tx = StaticSender {
+            core: &self.core,
+            slots: &self.slots[..],
+        };
+        let rx = StaticReceiver {
+            core: &self.core,
+            slots: &self.slots[..],
+        };
+        Some((tx, rx))
+    }
+}
+
 // === impl Sender ===
 
 impl<T: Default> Sender<T> {
     pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
-        self.inner.try_send_ref().map(SendRef)
+        self.inner
+            .core
+            .try_send_ref(self.inner.slots.as_ref())
+            .map(SendRef)
     }
 
     pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
-        self.inner.try_send(val)
+        self.inner.core.try_send(self.inner.slots.as_ref(), val)
     }
 
     pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
-        // fast path: avoid getting the thread and constructing the node if the
-        // slot is immediately ready.
-        match self.inner.try_send_ref() {
-            Ok(slot) => return Ok(SendRef(slot)),
-            Err(TrySendError::Closed(_)) => return Err(Closed(())),
-            _ => {}
-        }
-
-        let mut waiter = queue::Waiter::new();
-        let mut unqueued = true;
-        let thread = thread::current();
-        loop {
-            let node = unsafe {
-                // Safety: in this case, it's totally safe to pin the waiter, as
-                // it is owned uniquely by this function, and it cannot possibly
-                // be moved while this thread is parked.
-                Pin::new_unchecked(&mut waiter)
-            };
-
-            let wait = if unqueued {
-                test_dbg!(self.inner.tx_wait.start_wait(node, &thread))
-            } else {
-                test_dbg!(self.inner.tx_wait.continue_wait(node, &thread))
-            };
-
-            match wait {
-                WaitResult::Closed => return Err(Closed(())),
-                WaitResult::Notified => match self.inner.try_send_ref() {
-                    Ok(slot) => return Ok(SendRef(slot)),
-                    Err(TrySendError::Closed(_)) => return Err(Closed(())),
-                    _ => {}
-                },
-                WaitResult::Wait => {
-                    unqueued = false;
-                    thread::park();
-                }
-            }
-        }
+        send_ref(&self.inner.core, self.inner.slots.as_ref())
     }
 
     pub fn send(&self, val: T) -> Result<(), Closed<T>> {
@@ -111,7 +132,7 @@ impl<T: Default> Sender<T> {
 
 impl<T> Clone for Sender<T> {
     fn clone(&self) -> Self {
-        test_dbg!(self.inner.tx_count.fetch_add(1, Ordering::Relaxed));
+        test_dbg!(self.inner.core.tx_count.fetch_add(1, Ordering::Relaxed));
         Self {
             inner: self.inner.clone(),
         }
@@ -120,14 +141,14 @@ impl<T> Clone for Sender<T> {
 
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
-        if test_dbg!(self.inner.tx_count.fetch_sub(1, Ordering::Release)) > 1 {
+        if test_dbg!(self.inner.core.tx_count.fetch_sub(1, Ordering::Release)) > 1 {
             return;
         }
 
         // if we are the last sender, synchronize
         test_dbg!(atomic::fence(Ordering::SeqCst));
-        if self.inner.core.close() {
-            self.inner.rx_wait.close_tx();
+        if self.inner.core.core.close() {
+            self.inner.core.rx_wait.close_tx();
         }
     }
 }
@@ -136,20 +157,7 @@ impl<T> Drop for Sender<T> {
 
 impl<T: Default> Receiver<T> {
     pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
-        loop {
-            match self.inner.poll_recv_ref(thread::current) {
-                Poll::Ready(r) => {
-                    return r.map(|slot| RecvRef {
-                        _notify: super::NotifyTx(&self.inner.tx_wait),
-                        slot,
-                    })
-                }
-                Poll::Pending => {
-                    test_println!("parking ({:?})", thread::current());
-                    thread::park();
-                }
-            }
-        }
+        recv_ref(&self.inner.core, self.inner.slots.as_ref())
     }
 
     pub fn recv(&self) -> Option<T> {
@@ -158,7 +166,7 @@ impl<T: Default> Receiver<T> {
     }
 
     pub fn is_closed(&self) -> bool {
-        test_dbg!(self.inner.tx_count.load(Ordering::SeqCst)) <= 1
+        test_dbg!(self.inner.core.tx_count.load(Ordering::SeqCst)) <= 1
     }
 }
 
@@ -172,6 +180,182 @@ impl<'a, T: Default> Iterator for &'a Receiver<T> {
 
 impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
-        self.inner.close_rx();
+        self.inner.core.close_rx();
+    }
+}
+
+// === impl StaticSender ===
+
+impl<T: Default> StaticSender<T> {
+    pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
+        self.core.try_send_ref(self.slots).map(SendRef)
+    }
+
+    pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
+        self.core.try_send(self.slots, val)
+    }
+
+    pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
+        send_ref(self.core, self.slots)
+    }
+
+    pub fn send(&self, val: T) -> Result<(), Closed<T>> {
+        match self.send_ref() {
+            Err(Closed(())) => Err(Closed(val)),
+            Ok(mut slot) => {
+                slot.with_mut(|slot| *slot = val);
+                Ok(())
+            }
+        }
+    }
+}
+
+impl<T> Clone for StaticSender<T> {
+    fn clone(&self) -> Self {
+        test_dbg!(self.core.tx_count.fetch_add(1, Ordering::Relaxed));
+        Self {
+            core: self.core,
+            slots: self.slots,
+        }
+    }
+}
+
+impl<T> Drop for StaticSender<T> {
+    fn drop(&mut self) {
+        if test_dbg!(self.core.tx_count.fetch_sub(1, Ordering::Release)) > 1 {
+            return;
+        }
+
+        // if we are the last sender, synchronize
+        test_dbg!(atomic::fence(Ordering::SeqCst));
+        if self.core.core.close() {
+            self.core.rx_wait.close_tx();
+        }
+    }
+}
+
+impl<T> fmt::Debug for StaticReceiver<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaticReceiver")
+            .field("core", &self.core)
+            .field("slots", &format_args!("&[..]"))
+            .finish()
+    }
+}
+
+// === impl Receiver ===
+
+impl<T: Default> StaticReceiver<T> {
+    pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
+        recv_ref(self.core, self.slots)
+    }
+
+    pub fn recv(&self) -> Option<T> {
+        let val = self.recv_ref()?.with_mut(core::mem::take);
+        Some(val)
+    }
+
+    pub fn is_closed(&self) -> bool {
+        test_dbg!(self.core.tx_count.load(Ordering::SeqCst)) <= 1
+    }
+}
+
+impl<'a, T: Default> Iterator for &'a StaticReceiver<T> {
+    type Item = RecvRef<'a, T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.recv_ref()
+    }
+}
+
+impl<T> Drop for StaticReceiver<T> {
+    fn drop(&mut self) {
+        self.core.close_rx();
+    }
+}
+
+impl<T> fmt::Debug for StaticSender<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaticSender")
+            .field("core", &self.core)
+            .field("slots", &format_args!("&[..]"))
+            .finish()
+    }
+}
+
+// === impl Inner ===
+
+impl<T> fmt::Debug for Inner<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Inner")
+            .field("core", &self.core)
+            .field("slots", &format_args!("Box<[..]>"))
+            .finish()
+    }
+}
+
+#[inline]
+fn recv_ref<'a, T: Default>(
+    core: &'a ChannelCore<Thread>,
+    slots: &'a [Slot<T>],
+) -> Option<RecvRef<'a, T>> {
+    loop {
+        match core.poll_recv_ref(slots, thread::current) {
+            Poll::Ready(r) => {
+                return r.map(|slot| RecvRef {
+                    _notify: super::NotifyTx(&core.tx_wait),
+                    slot,
+                })
+            }
+            Poll::Pending => {
+                test_println!("parking ({:?})", thread::current());
+                thread::park();
+            }
+        }
+    }
+}
+
+#[inline]
+fn send_ref<'a, T: Default>(
+    core: &'a ChannelCore<Thread>,
+    slots: &'a [Slot<T>],
+) -> Result<SendRef<'a, T>, Closed<()>> {
+    // fast path: avoid getting the thread and constructing the node if the
+    // slot is immediately ready.
+    match core.try_send_ref(slots) {
+        Ok(slot) => return Ok(SendRef(slot)),
+        Err(TrySendError::Closed(_)) => return Err(Closed(())),
+        _ => {}
+    }
+
+    let mut waiter = queue::Waiter::new();
+    let mut unqueued = true;
+    let thread = thread::current();
+    loop {
+        let node = unsafe {
+            // Safety: in this case, it's totally safe to pin the waiter, as
+            // it is owned uniquely by this function, and it cannot possibly
+            // be moved while this thread is parked.
+            Pin::new_unchecked(&mut waiter)
+        };
+
+        let wait = if unqueued {
+            test_dbg!(core.tx_wait.start_wait(node, &thread))
+        } else {
+            test_dbg!(core.tx_wait.continue_wait(node, &thread))
+        };
+
+        match wait {
+            WaitResult::Closed => return Err(Closed(())),
+            WaitResult::Notified => match core.try_send_ref(slots.as_ref()) {
+                Ok(slot) => return Ok(SendRef(slot)),
+                Err(TrySendError::Closed(_)) => return Err(Closed(())),
+                _ => {}
+            },
+            WaitResult::Wait => {
+                unqueued = false;
+                thread::park();
+            }
+        }
     }
 }
