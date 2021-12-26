@@ -17,10 +17,9 @@ pub struct ThingBuf<T> {
 impl<T: Default> ThingBuf<T> {
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0);
-        let slots = (0..capacity).map(|_| Slot::empty()).collect();
         Self {
             core: Core::new(capacity),
-            slots,
+            slots: Slot::make_boxed_array(capacity),
         }
     }
 

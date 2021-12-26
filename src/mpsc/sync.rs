@@ -17,10 +17,9 @@ use core::{fmt, pin::Pin};
 
 /// Returns a new asynchronous multi-producer, single consumer channel.
 pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
-    let slots = (0..capacity).map(|_| Slot::empty()).collect();
     let inner = Arc::new(Inner {
         core: ChannelCore::new(capacity),
-        slots,
+        slots: Slot::make_boxed_array(capacity),
     });
     let tx = Sender {
         inner: inner.clone(),
@@ -110,8 +109,6 @@ impl_recv_ref! {
 
 #[cfg(not(all(loom, test)))]
 impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
-    const SLOT: Slot<T> = Slot::empty();
-
     /// Constructs a new statically-allocated, blocking bounded MPSC channel.
     ///
     /// A statically-allocated channel allows using a MPSC channel without
@@ -153,7 +150,7 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
     pub const fn new() -> Self {
         Self {
             core: ChannelCore::new(CAPACITY),
-            slots: [Self::SLOT; CAPACITY],
+            slots: Slot::make_static_array::<CAPACITY>(),
             is_split: AtomicBool::new(false),
         }
     }
