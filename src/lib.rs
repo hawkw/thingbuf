@@ -159,14 +159,9 @@ impl Core {
             test_dbg!(idx);
             test_dbg!(gen);
             let slot = &slots[idx];
-            let actual_state = test_dbg!(slot.state.load(Acquire));
-            let state = if actual_state == EMPTY_STATE {
-                idx
-            } else {
-                actual_state
-            };
+            let state = test_dbg!(slot.state.load(Acquire));
 
-            if test_dbg!(state == tail) || test_dbg!(actual_state == EMPTY_STATE && gen == 0) {
+            if test_dbg!(state == tail) {
                 // Move the tail index forward by 1.
                 let next_tail = self.next(idx, gen);
                 match test_dbg!(self
@@ -243,7 +238,6 @@ impl Core {
             test_dbg!(gen);
             let slot = &slots[idx];
             let state = test_dbg!(slot.state.load(Acquire));
-            let state = if state == EMPTY_STATE { idx } else { state };
 
             // If the slot's state is ahead of the head index by one, we can pop
             // it.
@@ -416,22 +410,40 @@ unsafe impl<T: Send> Sync for Ref<'_, T> {}
 
 // === impl Slot ===
 
-const EMPTY_STATE: usize = usize::MAX;
-
 impl<T> Slot<T> {
+    #[cfg(feature = "alloc")]
+    pub(crate) fn make_boxed_array(capacity: usize) -> Box<[Self]> {
+        (0..capacity).map(|i| Slot::new(i)).collect()
+    }
+
     #[cfg(not(all(loom, test)))]
-    const fn empty() -> Self {
+    const EMPTY: Self = Self::new(usize::MAX);
+
+    #[cfg(not(all(loom, test)))]
+    pub(crate) const fn make_static_array<const CAPACITY: usize>() -> [Self; CAPACITY] {
+        let mut array = [Self::EMPTY; CAPACITY];
+        let mut i = 0;
+        while i < CAPACITY {
+            array[i] = Self::new(i);
+            i += 1;
+        }
+
+        array
+    }
+
+    #[cfg(not(all(loom, test)))]
+    const fn new(idx: usize) -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
-            state: AtomicUsize::new(EMPTY_STATE),
+            state: AtomicUsize::new(idx),
         }
     }
 
     #[cfg(all(loom, test))]
-    fn empty() -> Self {
+    fn new(idx: usize) -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
-            state: AtomicUsize::new(EMPTY_STATE),
+            state: AtomicUsize::new(idx),
         }
     }
 }

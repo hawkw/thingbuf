@@ -11,12 +11,10 @@ pub struct StaticThingBuf<T, const CAP: usize> {
 
 #[cfg(not(test))]
 impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
-    const SLOT: Slot<T> = Slot::empty();
-
     pub const fn new() -> Self {
         Self {
             core: Core::new(CAP),
-            slots: [Self::SLOT; CAP],
+            slots: Slot::make_static_array::<CAP>(),
         }
     }
 }
