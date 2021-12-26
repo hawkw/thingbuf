@@ -6,11 +6,10 @@
 ## What Is It?
 
 `thingbuf` is a lock-free array-based concurrent ring buffer that allows access
-to slots in the buffer by reference. It's also [asynchronous] and [blocking]
-bounded MPSC channels implemented using the ring buffer.
+to slots in the buffer by reference. It's also [asynchronous][`thingbuf::mpsc`]
+and [blocking][`thingbuf::mpsc::sync`] bounded MPSC channels implemented using
+the ring buffer.
 
-[asynchronous]: https://docs.rs/thingbuf/latest/thingbuf/mpsc/index.html
-[blocking]: https://docs.rs/thingbuf/latest/latest/thingbuf/mpsc/sync/index.html
 ## When Should I Use It?
 
 - **If you want a high-throughput bounded MPSC channel** that allocates only on
@@ -20,9 +19,10 @@ bounded MPSC channels implemented using the ring buffer.
   channels. [`thingbuf::mpsc`] is a competitive choice for a general-purpose
   MPSC channel in most use cases.
 
-  Both [asynchronous] and [blocking] MPSC channels are available[^blocking-std],
-  so `thingbuf` can be used in place of asynchronous channels like
-  [`futures::channel::mpsc`] *and* blocking channels like [`std::sync::mpsc`].
+  Both [asynchronous][`thingbuf::mpsc`] and [blocking][`thingbuf::mpsc::sync`]
+  MPSC channels are available[^blocking-std], so `thingbuf` can be used in place
+  of asynchronous channels like [`futures::channel::mpsc`] *and* blocking
+  channels like [`std::sync::mpsc::sync_channel`].
 
 - **If you can't allocate** or **you need to build with `#![no_std]`** because
   you're working on embedded systems or other bare-metal software. Thingbuf
@@ -98,6 +98,16 @@ some cases where you might be better off considering other options:
   "ringbuf"), I called it "stringbuf". Then, I realized you could do this with
   more than just strings. In fact, it can be generalized to arbitrary...things.
   So, "thingbuf".
+
+[`thingbuf::mpsc`]: https://docs.rs/thingbuf/0.1/thingbuf/mpsc/index.html
+[`thingbuf::mpsc::sync`]: https://docs.rs/thingbuf/0.1/thingbuf/mpsc/sync/index.html
+[static-queue]: https://docs.rs/thingbuf/0.1/thingbuf/struct.StaticThingBuf.html
+[static-mpsc]: https://docs.rs/thingbuf/0.1./thingbuf/mpsc/struct.StaticChannel.html
+[`futures::channel::mpsc`]: https://docs.rs/futures/latest/futures/channel/mpsc/index.html
+[`std::sync::mpsc::sync_channel`]: https://doc.rust-lang.org/stable/std/sync/mpsc/fn.sync_channel.html
+[`tokio::sync::mpsc`]: https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html
+[`tracing`]: https://crates.io/crates/tracing
+[`crossbeam-channel`]: https://crates.io/crates/crossbeam-channel
 
 [^blocking-std]: The synchronous (blocking) channel naturally requires `std` in
 order to park threads.
