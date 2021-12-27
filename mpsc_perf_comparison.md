@@ -147,7 +147,7 @@ compares the performance of several popular asynchronous MPSC channel
 implementations ([`tokio::sync::mpsc`], [`async_std::channel`], and
 [`futures::channel::mpsc`]) with [`thingbuf::mpsc`].
 
-![Benchmark results](https://raw.githubusercontent.com/hawkw/thingbuf/main/assets/async_mpsc_integer-8c882b0/lines.svg)
+![Benchmark results](https://raw.githubusercontent.com/hawkw/thingbuf/main/assets/async_mpsc_integer-8c882b0/report/lines.svg)
 
 [`tokio::sync::mpsc`]: https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html
 [`async_std::channel`]: https://docs.rs/async-std/latest/async_std/channel/index.html
