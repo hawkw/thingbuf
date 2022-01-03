@@ -1,6 +1,6 @@
 #![cfg_attr(docsrs, doc = include_str!("../README.md"))]
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 use core::{cmp, fmt, mem::MaybeUninit, ops};
 
 #[macro_use]
@@ -39,11 +39,14 @@ use crate::{
     util::{Backoff, CachePadded},
 };
 
+/// A reference to an entry in a [`ThingBuf`].
 pub struct Ref<'slot, T> {
     ptr: MutPtr<MaybeUninit<T>>,
     slot: &'slot Slot<T>,
     new_state: usize,
 }
+
+/// Error returned when sending a message failed because a channel is at capacity.
 
 pub struct Full<T = ()>(T);
 

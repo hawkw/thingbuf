@@ -6,6 +6,7 @@ use core::{fmt, ptr};
 #[cfg(all(loom, test))]
 mod tests;
 
+/// A fixed-size, lock-free multi-producer multi-consumer queue.
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct ThingBuf<T> {
     pub(crate) core: Core,
@@ -15,6 +16,7 @@ pub struct ThingBuf<T> {
 // === impl ThingBuf ===
 
 impl<T: Default> ThingBuf<T> {
+    /// Return a new `ThingBuf` with space for `capacity` entries.
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0);
         Self {
@@ -23,6 +25,11 @@ impl<T: Default> ThingBuf<T> {
         }
     }
 
+    /// Reserve a slot to push an entry into the queue, returning a [`Ref`] that
+    /// can be used to write to that slot.
+    ///
+    /// This can be used to reuse allocations for queue entries in place,
+    /// by clearing previous data prior to writing.
     pub fn push_ref(&self) -> Result<Ref<'_, T>, Full> {
         self.core.push_ref(&*self.slots).map_err(|e| match e {
             crate::mpsc::TrySendError::Full(()) => Full(()),
@@ -35,6 +42,8 @@ impl<T: Default> ThingBuf<T> {
         self.push_ref().map(|mut r| r.with_mut(f))
     }
 
+    /// Dequeue the first element in the queue, returning a [`Ref`] that can be
+    /// used to read from (or mutate) the element.
     pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
         self.core.pop_ref(&*self.slots).ok()
     }
@@ -46,11 +55,20 @@ impl<T: Default> ThingBuf<T> {
 }
 
 impl<T> ThingBuf<T> {
+    /// Returns the total capacity of the `ThingBuf`. This includes both
+    /// occupied and unoccupied entries.
+    ///
+    /// The number of _unoccupied_ entries can be determined by subtracing the
+    /// value returned by  [`len`] from the value returned by `capacity`.
     #[inline]
     pub fn capacity(&self) -> usize {
         self.slots.len()
     }
 
+    /// Returns the number of entries in the queue.
+    ///
+    /// The number of _unoccupied_ entries can be determined by subtracing the
+    /// value returned by  [`len`] from the value returned by `capacity`.
     #[inline]
     pub fn len(&self) -> usize {
         self.core.len()
