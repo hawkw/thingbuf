@@ -59,21 +59,77 @@ impl<T> ThingBuf<T> {
     /// occupied and unoccupied entries.
     ///
     /// The number of _unoccupied_ entries can be determined by subtracing the
-    /// value returned by  [`len`] from the value returned by `capacity`.
+    /// value returned by [`len`] from the value returned by `capacity`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::ThingBuf;
+    ///
+    /// let q = ThingBuf::<usize>::new(100);
+    /// assert_eq!(q.capacity(), 100);
+    /// ```
+    ///
+    /// Even after pushing several messages to the queue, the capacity remains
+    /// the same:
+    /// ```
+    /// # use thingbuf::ThingBuf;
+    ///
+    /// let q = ThingBuf::<usize>::new(100);
+    ///
+    /// *q.push_ref().unwrap() = 1;
+    /// *q.push_ref().unwrap() = 2;
+    /// *q.push_ref().unwrap() = 3;
+    ///
+    /// assert_eq!(q.capacity(), 100);
+    /// ```
     #[inline]
     pub fn capacity(&self) -> usize {
         self.slots.len()
     }
 
-    /// Returns the number of entries in the queue.
+    /// Returns the number of messages in the queue
     ///
     /// The number of _unoccupied_ entries can be determined by subtracing the
-    /// value returned by  [`len`] from the value returned by `capacity`.
+    /// value returned by [`len`] from the value returned by `capacity`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::ThingBuf;
+    ///
+    /// let q = ThingBuf::<usize>::new(100);
+    /// assert_eq!(q.len(), 0);
+    ///
+    /// *q.push_ref().unwrap() = 1;
+    /// *q.push_ref().unwrap() = 2;
+    /// *q.push_ref().unwrap() = 3;
+    /// assert_eq!(q.len(), 3);
+    ///
+    /// let _ = q.pop_ref();
+    /// assert_eq!(q.len(), 2);
+    /// ```
     #[inline]
     pub fn len(&self) -> usize {
         self.core.len()
     }
 
+    /// Returns `true` if there are currently no entries in this `ThingBuf`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::ThingBuf;
+    ///
+    /// let q = ThingBuf::<usize>::new(100);
+    /// assert!(q.is_empty());
+    ///
+    /// *q.push_ref().unwrap() = 1;
+    /// assert!(!q.is_empty());
+    ///
+    /// let _ = q.pop_ref();
+    /// assert!(q.is_empty());
+    /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
