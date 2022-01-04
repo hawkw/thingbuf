@@ -65,6 +65,37 @@ some cases where you might be better off considering other options:
 - **You want an unbounded channel**. I'm not going to write an unbounded
   channel. Unbounded channels are evil.
 
+## Usage
+
+To get started using `thingbuf`, add the following to your `Cargo.toml`:
+
+```toml
+[dependencies]
+thingbuf = "0.1"
+```
+
+By default, `thingbuf` depends on the Rust standard library, in order to
+implement APIs such as synchronous (blocking) channels. In `#![no_std]`
+projects, the `std` feature flag must be disabled:
+
+```toml
+[dependencies]
+thingbuf = { version = "0.1", default-features = false }
+```
+
+With the `std` feature disabled, `thingbuf` will depend only on `libcore`. This
+means that APIs that require dynamic memory allocation will not be enabled.
+Statically allocated [channels][static-mpsc] and [queues][static-queue] are
+available for code without a memory allocator.
+
+However, if a memory allocator _is_ available, `#![no_std]` code can also enable
+the `alloc` feature flag to depend on `liballoc`:
+
+```toml
+[dependencies]
+thingbuf = { version = "0.1", default-features = false, features = ["alloc"] }
+```
+
 ## FAQs
 
 - **Q: Why did you make this?**
