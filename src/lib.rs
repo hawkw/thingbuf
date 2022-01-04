@@ -47,7 +47,7 @@ pub struct Ref<'slot, T> {
 }
 
 /// Error returned when sending a message failed because a channel is at capacity.
-
+#[derive(Eq, PartialEq)]
 pub struct Full<T = ()>(T);
 
 /// State variables for the atomic ring buffer algorithm.
