@@ -31,6 +31,7 @@ pub struct StaticThingBuf<T, const CAP: usize> {
 
 #[cfg(not(test))]
 impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
+    /// Returns a new `StaticThingBuf` with space for `capacity` elements.
     pub const fn new() -> Self {
         Self {
             core: Core::new(CAP),
@@ -40,16 +41,91 @@ impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
 }
 
 impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
+    /// Returns the *total* capacity of this queue. This includes both
+    /// occupied and unoccupied entries.
+    ///
+    /// To determine the queue's remaining *unoccupied* capacity, use
+    /// [`remaining`] instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use thingbuf::StaticThingBuf;
+    /// static MY_THINGBUF: StaticThingBuf::<usize, 100> = StaticThingBuf::new();
+    ///
+    /// assert_eq!(MY_THINGBUF.capacity(), 100);
+    /// ```
+    ///
+    /// Even after pushing several messages to the queue, the capacity remains
+    /// the same:
+    /// ```
+    /// # use thingbuf::StaticThingBuf;
+    /// static MY_THINGBUF: StaticThingBuf::<usize, 100> = StaticThingBuf::new();
+    ///
+    /// *MY_THINGBUF.push_ref().unwrap() = 1;
+    /// *MY_THINGBUF.push_ref().unwrap() = 2;
+    /// *MY_THINGBUF.push_ref().unwrap() = 3;
+    ///
+    /// assert_eq!(MY_THINGBUF.capacity(), 100);
+    /// ```
     #[inline]
     pub fn capacity(&self) -> usize {
         CAP
     }
 
+    /// Returns the unoccupied capacity of the queue (i.e., how many additional
+    /// elements can be enqueued before the queue will be full).
+    ///
+    /// This is equivalent to subtracting the queue's [`len`] from its [`capacity`].
+    ///
+    /// [`len`]: Self::len
+    /// [`capacity]: Self::capacity
+    pub fn remaining(&self) -> usize {
+        self.capacity() - self.len()
+    }
+
+    /// Returns the number of elements in the queue
+    ///
+    /// To determine the queue's remaining *unoccupied* capacity, use
+    /// [`remaining`] instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use thingbuf::StaticThingBuf;
+    /// static MY_THINGBUF: StaticThingBuf::<usize, 100> = StaticThingBuf::new();
+    ///
+    /// assert_eq!(MY_THINGBUF.len(), 0);
+    ///
+    /// *MY_THINGBUF.push_ref().unwrap() = 1;
+    /// *MY_THINGBUF.push_ref().unwrap() = 2;
+    /// *MY_THINGBUF.push_ref().unwrap() = 3;
+    /// assert_eq!(MY_THINGBUF.len(), 3);
+    ///
+    /// let _ = MY_THINGBUF.pop_ref();
+    /// assert_eq!(MY_THINGBUF.len(), 2);
+    /// ```
     #[inline]
     pub fn len(&self) -> usize {
         self.core.len()
     }
 
+    /// Returns `true` if there are currently no elements in this `StaticThingBuf`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use thingbuf::StaticThingBuf;
+    /// static MY_THINGBUF: StaticThingBuf::<usize, 100> = StaticThingBuf::new();
+    ///
+    /// assert!(MY_THINGBUF.is_empty());
+    ///
+    /// *MY_THINGBUF.push_ref().unwrap() = 1;
+    /// assert!(!MY_THINGBUF.is_empty());
+    ///
+    /// let _ = MY_THINGBUF.pop_ref();
+    /// assert!(MY_THINGBUF.is_empty());
+    /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
