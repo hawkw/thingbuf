@@ -6,7 +6,177 @@ use core::{fmt, mem, ptr};
 #[cfg(all(loom, test))]
 mod tests;
 
-/// A fixed-size lock-free multi-producer multi-consumer queue.
+/// A fixed-size, lock-free, multi-producer multi-consumer (MPMC) queue.
+///
+/// This is a fixed-capacity, first-in, first-out data structure. Elements are
+/// enqueued at the front of the queue by calling the [`push`] method, and
+/// dequeued from the end of the queue by calling the [`pop`] method. Elements
+/// may be enqueued and dequeued from a `ThingBuf` concurrently by any number of
+/// threads or asynchronous tasks.
+///
+/// This queue is an implementation of a [design by Dmitry Vyukov][vyukov] of
+/// 1024cores.net.
+///
+/// # Examples
+///
+/// ```
+/// use thingbuf::ThingBuf;
+///
+/// let q = ThingBuf::new(2);
+///
+/// // Push some values to the queue.
+/// q.push(1).unwrap();
+/// q.push(2).unwrap();
+///
+/// // Now, the queue is at capacity.
+/// assert!(q.push(3).is_err());
+/// ```
+///
+/// # Allocation
+///
+/// A `ThingBuf` is a fixed-size, array-based queue. Elements in the queue are
+/// stored in a single array whose capacity is specified when the `ThingBuf` is
+/// constructed. This means that a `ThingBuf` requires only a single heap
+/// allocation over its entire lifespan. Calling [`ThingBuf::new`] will allocate
+/// an array to store `capacity` elements. Subsequent calls to [`push`] and
+/// [`pop`] will never allocate or deallocate memory.
+///
+/// If the size of the queue is known at compile-time, the [`StaticThingBuf`]
+/// type, which requires *no* heap allocations at all, can be used instead.
+///
+/// ## Reusing Allocations
+///
+/// Of course, if the *elements* in the queue are themselves heap-allocated
+/// (such as `String`s or `Vec`s), heap allocations and deallocations may still
+/// occur when those types are created or dropped. However, `ThingBuf` also
+/// provides an API for enqueueing and dequeueing elements *by reference*. In
+/// some use cases, this API can be used to reduce allocations for queue elements.
+///
+/// As an example, consider the case where multiple threads in a program format
+/// log messages and send them to a dedicated worker thread that writes those
+/// messages to a file. A naive implementation might look something like this:
+///
+/// ```rust
+/// use thingbuf::ThingBuf;
+/// use std::{sync::Arc, fmt, thread, fs::File, error::Error, io::Write};
+///
+/// // Called by application threads to log a message.
+/// fn log_event(q: &Arc<ThingBuf<String>>, message: &dyn fmt::Debug) {
+///     // Format the log line to a `String`.
+///     let line = format!("{:?}\n", message);
+///     // Send the string to the worker thread.
+///     let _ = q.push(line);
+///     // If the queue was full, ignore the error and drop the log line.
+/// }
+///
+/// fn main() -> Result<(), Box<dyn Error>> {
+/// # // wrap the actual code in a function that's never called so that running
+/// # // the test never actually creates the log file.
+/// # fn docs() -> Result<(), Box<dyn Error>> {
+///     let log_queue = Arc::new(ThingBuf::<String>::new(1024));
+///
+///     // Spawn the background worker thread.
+///     let q = log_queue.clone();
+///     let mut file = File::create("myapp.log")?;
+///     thread::spawn(move || {
+///         use std::io::Write;
+///         loop {
+///             // Pop from the queue, and write each log line to the file.
+///             while let Some(line) = q.pop() {
+///                 file.write_all(line.as_bytes()).unwrap();
+///             }
+///
+///             // No more messages in the queue!
+///             file.flush().unwrap();
+///             thread::yield_now();
+///         }
+///     });
+///
+///     // ...
+///     # Ok(())
+/// # }
+/// # Ok(())
+/// }
+/// ```
+///
+/// With this design, however, new `String`s are allocated for every message
+/// that's logged, and then are immediately deallocated once they are written to
+/// the file. This can have a negative performance impact.
+///
+/// Using `ThingBuf`'s [`push_ref`] and [`pop_ref`] methods, this code can be
+/// redesigned to _reuse_ `String` allocations in place. With these methods,
+/// rather than moving an element by-value into the queue when enqueueing, we
+/// instead reserve the rights to _mutate_ a slot in the queue in place,
+/// returning a [`Ref`]. Similarly, when dequeueing, we also recieve a [`Ref`]
+/// that allows reading from (and mutating) the dequeued element. This allows
+/// the queue to _own_ the set of `String`s used for formatting log messages,
+/// which are cleared in place and the existing allocation reused.
+///
+/// The rewritten code might look like this:
+///
+/// ```rust
+/// use thingbuf::ThingBuf;
+/// use std::{sync::Arc, fmt, thread, fs::File, error::Error};
+///
+/// // Called by application threads to log a message.
+/// fn log_event(q: &Arc<ThingBuf<String>>, message: &dyn fmt::Debug) {
+///     use std::fmt::Write;
+///
+///     // Reserve a slot in the queue to write to.
+///     if let Ok(mut slot) = q.push_ref() {
+///         // Clear the string in place, retaining the allocated capacity.
+///         slot.clear();
+///         // Write the log message to the string.
+///         write!(&mut *slot, "{:?}\n", message);
+///     }
+///     // Otherwise, if `push_ref` returns an error, the queue is full;
+///     // ignore this log line.
+/// }
+///
+/// fn main() -> Result<(), Box<dyn Error>> {
+/// # // wrap the actual code in a function that's never called so that running
+/// # // the test never actually creates the log file.
+/// # fn docs() -> Result<(), Box<dyn Error>> {
+///     let log_queue = Arc::new(ThingBuf::<String>::new(1024));
+///
+///     // Spawn the background worker thread.
+///     let q = log_queue.clone();
+///     let mut file = File::create("myapp.log")?;
+///     thread::spawn(move || {
+///         use std::io::Write;
+///         loop {
+///             // Pop from the queue, and write each log line to the file.
+///             while let Some(line) = q.pop_ref() {
+///                 file.write_all(line.as_bytes()).unwrap();
+///             }
+///
+///             // No more messages in the queue!
+///             file.flush().unwrap();
+///             thread::yield_now();
+///         }
+///     });
+///
+///     // ...
+///     # Ok(())
+/// # }
+/// # Ok(())
+/// }
+/// ```
+///
+/// In this implementation, the strings will only be reallocated if their
+/// current capacity is not large enough to store the formatted representation
+/// of the log message.
+///
+/// When using a `ThingBuf` in this manner, it can be thought of as a
+/// combination of a concurrent queue and an [object pool].
+///
+/// [`push`]: Self::push
+/// [`pop`]: Self::pop
+/// [`push_ref`]: Self::push_ref
+/// [`pop_ref`]: Self::pop_ref
+/// [`StaticThingBuf`]: crate::StaticThingBuf
+/// [vyukov]: https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
+/// [object pool]: https://en.wikipedia.org/wiki/Object_pool_pattern
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct ThingBuf<T> {
     pub(crate) core: Core,
@@ -16,7 +186,7 @@ pub struct ThingBuf<T> {
 // === impl ThingBuf ===
 
 impl<T: Default> ThingBuf<T> {
-    /// Returns a new `ThingBuf` with space for `capacity` entries.
+    /// Returns a new `ThingBuf` with space for `capacity` elements.
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0);
         Self {
@@ -120,6 +290,9 @@ impl<T: Default> ThingBuf<T> {
     /// - `Ok(())` if the element was enqueued
     /// - `Err(`[`Full`]`)`, containing the value, if there is no capacity
     ///   remaining in the queue
+    ///
+    /// [`push_ref`]: Self::push_ref
+    /// [`pop_ref`]: Self::pop_ref
     #[inline]
     pub fn push(&self, val: T) -> Result<(), Full<T>> {
         match self.push_ref() {
@@ -131,6 +304,14 @@ impl<T: Default> ThingBuf<T> {
         }
     }
 
+    /// Reserves a slot to push an element into the queue, and invokes the
+    /// provided function `f` with a mutable reference to that element.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(U)` containing the return value of the provided function, if the
+    ///   element was enqueued
+    /// - `Err(`[`Full`]`)`, if there is no capacity remaining in the queue
     #[inline]
     pub fn push_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Result<U, Full> {
         self.push_ref().map(|mut r| r.with_mut(f))
@@ -180,6 +361,14 @@ impl<T: Default> ThingBuf<T> {
         Some(mem::take(&mut *slot))
     }
 
+    /// Dequeue the first element in the queue by reference, and invoke the
+    /// provided function `f` with a mutable reference to the dequeued element.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(U)` containing the return value of the provided function, if the
+    ///   element was dequeued
+    /// - `None` if the queue is empty
     #[inline]
     pub fn pop_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
         self.pop_ref().map(|mut r| r.with_mut(f))
@@ -215,6 +404,8 @@ impl<T> ThingBuf<T> {
     ///
     /// assert_eq!(q.capacity(), 100);
     /// ```
+    ///
+    /// [`remaining`]: Self::remaining
     #[inline]
     pub fn capacity(&self) -> usize {
         self.slots.len()
@@ -226,7 +417,7 @@ impl<T> ThingBuf<T> {
     /// This is equivalent to subtracting the queue's [`len`] from its [`capacity`].
     ///
     /// [`len`]: Self::len
-    /// [`capacity]: Self::capacity
+    /// [`capacity`]: Self::capacity
     pub fn remaining(&self) -> usize {
         self.capacity() - self.len()
     }
@@ -252,12 +443,14 @@ impl<T> ThingBuf<T> {
     /// let _ = q.pop_ref();
     /// assert_eq!(q.len(), 2);
     /// ```
+    ///
+    /// [`remaining`]: Self::remaining
     #[inline]
     pub fn len(&self) -> usize {
         self.core.len()
     }
 
-    /// Returns `true` if there are currently no entries in this `ThingBuf`.
+    /// Returns `true` if there are currently no elements in this `ThingBuf`.
     ///
     /// # Examples
     ///
