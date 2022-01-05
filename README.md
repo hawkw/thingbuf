@@ -10,7 +10,7 @@ to slots in the buffer by reference. It's also [asynchronous][`thingbuf::mpsc`]
 and [blocking][`thingbuf::mpsc::sync`] bounded MPSC channels implemented using
 the ring buffer.
 
-## When Should I Use It?
+### When Should I Use It?
 
 - **If you want a high-throughput bounded MPSC channel** that allocates only on
   channel creation. Some MPSC channels have good throughput. Some other MPSC
@@ -38,7 +38,7 @@ the ring buffer.
   than switching between separate `std` and `#![no_std]` channel
   implementations.
 
-## When *Shouldn't* I Use It?
+### When *Shouldn't* I Use It?
 
 It's equally important to discuss when `thingbuf` should *not* be used. Here are
 some cases where you might be better off considering other options:
@@ -64,6 +64,29 @@ some cases where you might be better off considering other options:
 
 - **You want an unbounded channel**. I'm not going to write an unbounded
   channel. Unbounded channels are evil.
+
+## Terminology
+
+This crate's API and documentation makes a distinction between the terms "queue"
+and "channel". The term _queue_ will refer to the [queue abstract data
+type][q-adt] in general &mdash; any first-in, first-out data structure is a
+queue.
+
+The term _channel_ will refer to a subtype of concurrent queue that also
+functions as a synchronization primitive. A channel is a queue which can be
+shared between multiple threads or asynchronous tasks, and which allows those
+threads or tasks to wait for elements to be added or removed from the queue.
+
+In the Rust standard library, the [`std::collections::VecDeque`] type
+is an example of a queue that is not a channel: it is a first-in, first-out data
+structure, but it cannot be concurrently enqueued to and dequeued from by
+multiple threads or tasks. In comparison, the types in the [`std::sync::mpsc`]
+module provide a prototypical example of channels, as they serve as
+synchronization primitives for cross-thread communication.
+
+[q-adt]: https://en.wikipedia.org/wiki/Queue_(abstract_data_type)
+[`std::collections::VecDeque`]: https://doc.rust-lang.org/stable/std/collections/struct.VecDeque.html
+[`std::sync::mpsc`]: https://doc.rust-lang.org/stable/std/sync/mpsc/index.html
 
 ## Usage
 
