@@ -1,7 +1,6 @@
-use crate::loom::atomic::Ordering;
 use crate::{Core, Full, Ref, Slot};
 use alloc::boxed::Box;
-use core::{fmt, mem, ptr};
+use core::{fmt, mem};
 
 #[cfg(all(loom, test))]
 mod tests;
@@ -474,15 +473,7 @@ impl<T> ThingBuf<T> {
 
 impl<T> Drop for ThingBuf<T> {
     fn drop(&mut self) {
-        let tail = self.core.tail.load(Ordering::SeqCst);
-        let (idx, gen) = self.core.idx_gen(tail);
-        let num_initialized = if gen > 0 { self.capacity() } else { idx };
-        for slot in &self.slots[..num_initialized] {
-            unsafe {
-                slot.value
-                    .with_mut(|value| ptr::drop_in_place((*value).as_mut_ptr()));
-            }
-        }
+        self.core.drop_slots(&mut self.slots[..]);
     }
 }
 

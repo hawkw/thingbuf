@@ -385,6 +385,12 @@ impl<T> fmt::Debug for Inner<T> {
     }
 }
 
+impl<T> Drop for Inner<T> {
+    fn drop(&mut self) {
+        self.core.core.drop_slots(&mut self.slots[..])
+    }
+}
+
 #[inline]
 fn recv_ref<'a, T: Default>(
     core: &'a ChannelCore<Thread>,

@@ -1,7 +1,7 @@
 #![cfg_attr(docsrs, doc = include_str!("../README.md"))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-use core::{cmp, fmt, mem::MaybeUninit, ops};
+use core::{cmp, fmt, mem::MaybeUninit, ops, ptr};
 
 #[macro_use]
 mod macros;
@@ -72,6 +72,8 @@ struct Core {
     idx_mask: usize,
     closed: usize,
     capacity: usize,
+    /// Set when dropping the slots in the ring buffer, to avoid potential double-frees.
+    has_dropped_slots: bool,
 }
 
 struct Slot<T> {
@@ -94,6 +96,8 @@ impl Core {
             closed,
             idx_mask,
             capacity,
+
+            has_dropped_slots: false,
         }
     }
 
@@ -111,6 +115,9 @@ impl Core {
             gen_mask,
             idx_mask,
             capacity,
+
+            #[cfg(debug_assertions)]
+            has_dropped_slots: false,
         }
     }
 
@@ -320,6 +327,39 @@ impl Core {
                 };
             }
         }
+    }
+
+    fn drop_slots<T>(&mut self, slots: &mut [Slot<T>]) {
+        debug_assert!(
+            !self.has_dropped_slots,
+            "tried to drop slots twice! core={:#?}",
+            self
+        );
+        if self.has_dropped_slots {
+            return;
+        }
+
+        let tail = self.tail.load(SeqCst);
+        let (idx, gen) = self.idx_gen(tail);
+        let num_initialized = if gen > 0 { self.capacity() } else { idx };
+        for slot in &mut slots[..num_initialized] {
+            unsafe {
+                slot.value
+                    .with_mut(|value| ptr::drop_in_place((*value).as_mut_ptr()));
+            }
+        }
+
+        self.has_dropped_slots = true;
+    }
+}
+
+impl Drop for Core {
+    fn drop(&mut self) {
+        debug_assert!(
+            self.has_dropped_slots,
+            "tried to drop Core without dropping slots! core={:#?}",
+            self
+        );
     }
 }
 

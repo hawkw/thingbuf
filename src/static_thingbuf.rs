@@ -1,6 +1,5 @@
-use crate::loom::atomic::Ordering;
 use crate::{Core, Full, Ref, Slot};
-use core::{fmt, mem, ptr};
+use core::{fmt, mem};
 
 /// A statically allocated, fixed-size lock-free multi-producer multi-consumer
 /// queue.
@@ -486,20 +485,6 @@ impl<T: Default, const CAP: usize> StaticThingBuf<T, CAP> {
     }
 }
 
-impl<T, const CAP: usize> Drop for StaticThingBuf<T, CAP> {
-    fn drop(&mut self) {
-        let tail = self.core.tail.load(Ordering::SeqCst);
-        let (idx, gen) = self.core.idx_gen(tail);
-        let num_initialized = if gen > 0 { self.capacity() } else { idx };
-        for slot in &self.slots[..num_initialized] {
-            unsafe {
-                slot.value
-                    .with_mut(|value| ptr::drop_in_place((*value).as_mut_ptr()));
-            }
-        }
-    }
-}
-
 impl<T, const CAP: usize> fmt::Debug for StaticThingBuf<T, CAP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StaticThingBuf")
@@ -507,5 +492,11 @@ impl<T, const CAP: usize> fmt::Debug for StaticThingBuf<T, CAP> {
             .field("slots", &format_args!("[...]"))
             .field("core", &self.core)
             .finish()
+    }
+}
+
+impl<T, const CAP: usize> Drop for StaticThingBuf<T, CAP> {
+    fn drop(&mut self) {
+        self.core.drop_slots(&mut self.slots[..]);
     }
 }
