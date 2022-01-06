@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    loom::{self, future, thread},
+    loom::{self, future, thread, alloc::Track},
     ThingBuf,
 };
 
@@ -13,18 +13,18 @@ fn mpsc_try_send_recv() {
         let p1 = {
             let tx = tx.clone();
             thread::spawn(move || {
-                *tx.try_send_ref().unwrap() = 1;
+                *tx.try_send_ref().unwrap() = Track::new(1);
             })
         };
         let p2 = thread::spawn(move || {
-            *tx.try_send_ref().unwrap() = 2;
-            *tx.try_send_ref().unwrap() = 3;
+            *tx.try_send_ref().unwrap() = Track::new(2);
+            *tx.try_send_ref().unwrap() = Track::new(3);
         });
 
         let mut vals = future::block_on(async move {
             let mut vals = Vec::new();
             while let Some(val) = rx.recv_ref().await {
-                vals.push(*val);
+                vals.push(*val.get_ref());
             }
             vals
         });
@@ -73,6 +73,43 @@ fn rx_closes() {
         producer.join().unwrap();
     })
 }
+
+#[test]
+fn rx_close_unconsumed() {
+    const MESSAGES: usize = 4;
+
+    async fn do_producer(tx: Sender<Track<i32>>, n: usize) {
+        let mut i = 1;
+        while let Ok(mut slot) = tx.send_ref().await {
+            test_println!("producer {} sending {}...", n, i);
+            *slot = Track::new(i);
+            i += 1;
+        }
+    }
+
+    loom::model(|| {
+        let (tx, rx) = channel(MESSAGES);
+
+        let consumer = thread::spawn(move || future::block_on(async move {
+            // recieve one message
+            let msg = rx.recv().await;
+            test_println!("recv {:?}", msg);
+            assert!(msg.is_some());
+            // drop the receiver...
+        }));
+
+        let producer = {
+            let tx = tx.clone();
+            thread::spawn(move || future::block_on(do_producer(tx, 1)))
+        };
+
+        future::block_on(do_producer(tx, 2));
+
+        producer.join().unwrap();
+        consumer.join().unwrap();
+    })
+}
+
 
 #[test]
 fn spsc_recv_then_send() {
