@@ -55,6 +55,42 @@ jobs:
           command: test
           args: --profile loom --lib -- mpsc_try_send_recv
 
+  async_rx_close_unconsumed:
+    name: "mpsc::rx_close_unconsumed"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --profile loom --lib -- mpsc::rx_close_unconsumed
+
+  sync_rx_close_unconsumed:
+    name: "sync::rx_close_unconsumed"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --profile loom --lib -- mpsc_sync::rx_close_unconsumed
+
   loom_mpsc_async:
     name: "mpsc"
     runs-on: ubuntu-latest

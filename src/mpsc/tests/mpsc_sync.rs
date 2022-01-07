@@ -79,8 +79,13 @@ fn rx_closes() {
 }
 
 #[test]
+#[cfg_attr(ci_skip_slow_models, ignore)]
 fn rx_close_unconsumed() {
-    const MESSAGES: usize = 4;
+    // XXX(eliza): it would be nice to run this with more messages, but
+    // increasing this makes the model really unreasonably slow --- on my
+    // machine, four messages takes over 89,000,000 iterations and runs for
+    // about 2 hours...
+    const MESSAGES: usize = 2;
 
     fn do_producer(tx: sync::Sender<Track<i32>>, n: usize) -> impl FnOnce() + Send + Sync {
         move || {
