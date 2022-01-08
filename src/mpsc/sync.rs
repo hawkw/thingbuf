@@ -10,6 +10,7 @@ use crate::{
         sync::Arc,
         thread::{self, Thread},
     },
+    util::Backoff,
     wait::queue,
     Ref,
 };
@@ -428,6 +429,7 @@ fn send_ref<'a, T: Default>(
     let mut waiter = queue::Waiter::new();
     let mut unqueued = true;
     let thread = thread::current();
+    let mut boff = Backoff::new();
     loop {
         let node = unsafe {
             // Safety: in this case, it's totally safe to pin the waiter, as
@@ -444,11 +446,14 @@ fn send_ref<'a, T: Default>(
 
         match wait {
             WaitResult::Closed => return Err(Closed(())),
-            WaitResult::Notified => match core.try_send_ref(slots.as_ref()) {
-                Ok(slot) => return Ok(SendRef(slot)),
-                Err(TrySendError::Closed(_)) => return Err(Closed(())),
-                _ => {}
-            },
+            WaitResult::Notified => {
+                boff.spin_yield();
+                match core.try_send_ref(slots.as_ref()) {
+                    Ok(slot) => return Ok(SendRef(slot)),
+                    Err(TrySendError::Closed(_)) => return Err(Closed(())),
+                    _ => {}
+                }
+            }
             WaitResult::Wait => {
                 unqueued = false;
                 thread::park();

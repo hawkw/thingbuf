@@ -79,12 +79,37 @@ fn rx_closes() {
 }
 
 #[test]
-#[cfg_attr(ci_skip_slow_models, ignore)]
-fn rx_close_unconsumed() {
-    // XXX(eliza): it would be nice to run this with more messages, but
-    // increasing this makes the model really unreasonably slow --- on my
-    // machine, four messages takes over 89,000,000 iterations and runs for
-    // about 2 hours...
+fn rx_close_unconsumed_spsc() {
+    // Tests that messages that have not been consumed by the receiver are
+    // dropped when dropping the channel.
+    const MESSAGES: usize = 4;
+
+    loom::model(|| {
+        let (tx, rx) = sync::channel(MESSAGES);
+
+        let consumer = thread::spawn(move || {
+            // recieve one message
+            let msg = rx.recv();
+            test_println!("recv {:?}", msg);
+            assert!(msg.is_some());
+            // drop the receiver...
+        });
+
+        let mut i = 1;
+        while let Ok(mut slot) = tx.send_ref() {
+            test_println!("producer sending {}...", i);
+            *slot = Track::new(i);
+            i += 1;
+        }
+
+        consumer.join().unwrap();
+        drop(tx);
+    })
+}
+
+#[test]
+#[ignore] // This is marked as `ignore` because it takes over an hour to run.
+fn rx_close_unconsumed_mpsc() {
     const MESSAGES: usize = 2;
 
     fn do_producer(tx: sync::Sender<Track<i32>>, n: usize) -> impl FnOnce() + Send + Sync {
