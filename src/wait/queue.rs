@@ -437,7 +437,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
     pub(crate) fn close(&self) {
         test_println!("WaitQueue::close()");
 
-        test_dbg!(self.state.store(CLOSED, SeqCst));
+        test_dbg!(self.state.swap(CLOSED, SeqCst));
         let mut list = self.list.lock();
         while !list.is_empty() {
             if let Some(waiter) = list.dequeue(CLOSED) {

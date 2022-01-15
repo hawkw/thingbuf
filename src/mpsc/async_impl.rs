@@ -595,16 +595,25 @@ impl<T> PinnedDrop for SendRefFuture<'_, T> {
     }
 }
 
-#[cfg(feature = "alloc")]
-impl<T> fmt::Debug for Inner<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Inner")
-            .field("core", &self.core)
-            .field("slots", &format_args!("Box<[..]>"))
-            .finish()
+feature! {
+    #![feature = "alloc"]
+    impl<T> fmt::Debug for Inner<T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Inner")
+                .field("core", &self.core)
+                .field("slots", &format_args!("Box<[..]>"))
+                .finish()
+        }
+    }
+
+    impl<T> Drop for Inner<T> {
+        fn drop(&mut self) {
+            self.core.core.drop_slots(&mut self.slots[..])
+        }
     }
 }
 
+#[cfg(feature = "alloc")]
 #[cfg(test)]
 mod tests {
     use super::*;
