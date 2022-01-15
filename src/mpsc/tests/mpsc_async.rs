@@ -103,7 +103,6 @@ fn rx_close_unconsumed_spsc() {
         });
 
         consumer.join().unwrap();
-        drop(tx);
     })
 }
 
