@@ -7,6 +7,7 @@ use core::{cmp, fmt, mem::MaybeUninit, ops, ptr};
 mod macros;
 
 mod loom;
+mod recycle;
 mod util;
 mod wait;
 
