@@ -7,9 +7,13 @@ use core::{cmp, fmt, mem::MaybeUninit, ops, ptr};
 mod macros;
 
 mod loom;
-mod recycle;
+pub mod mpsc;
+pub mod recycle;
 mod util;
 mod wait;
+
+mod static_thingbuf;
+pub use self::{recycle::Recycle, static_thingbuf::StaticThingBuf};
 
 #[cfg_attr(docsrs, doc = include_str!("../mpsc_perf_comparison.md"))]
 pub mod mpsc_perf_comparison {
@@ -26,11 +30,6 @@ feature! {
     mod stringbuf;
     pub use stringbuf::{StaticStringBuf, StringBuf};
 }
-
-pub mod mpsc;
-
-mod static_thingbuf;
-pub use self::static_thingbuf::StaticThingBuf;
 
 use crate::{
     loom::{
