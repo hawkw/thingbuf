@@ -51,7 +51,7 @@ impl WithCapacity {
 
 feature! {
     #![feature = "alloc"]
-    use alloc::{vec::Vec, string::String, collections::{VecDeque}};
+    use alloc::{vec::Vec, string::String, collections::{VecDeque, BinaryHeap}};
 
     impl<T> Recycle<Vec<T>> for WithCapacity {
         fn new_element(&self) -> Vec<T> {
@@ -81,6 +81,17 @@ feature! {
         }
 
         fn recycle(&self, element: &mut VecDeque<T>) {
+            element.clear();
+            element.shrink_to(self.max);
+        }
+    }
+
+    impl<T: core::cmp::Ord> Recycle<BinaryHeap<T>> for WithCapacity {
+        fn new_element(&self) -> BinaryHeap<T> {
+            BinaryHeap::with_capacity(self.min)
+        }
+
+        fn recycle(&self, element: &mut BinaryHeap<T>) {
             element.clear();
             element.shrink_to(self.max);
         }
