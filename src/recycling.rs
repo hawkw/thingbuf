@@ -31,7 +31,7 @@ pub trait Recycle<T> {
 ///
 /// [creates new elements]: DefaultRecycle::new_element
 /// [recycled]: DefaultRecycle::recycle
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct DefaultRecycle(());
 
 /// A [`Recycle`] implementation for types that provide `with_capacity`,
@@ -138,10 +138,26 @@ pub struct DefaultRecycle(());
 /// # Allocation Reuse
 ///
 /// When an upper bound is not set, this
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct WithCapacity {
     min: usize,
     max: usize,
+}
+
+// TODO(eliza): consider making this public?
+// TODO(eliza): consider making this a trait method with a default impl?
+#[inline(always)]
+pub(crate) fn take<R, T>(element: &mut T, recycle: &R) -> T
+where
+    R: Recycle<T>,
+{
+    core::mem::replace(element, recycle.new_element())
+}
+
+impl DefaultRecycle {
+    pub const fn new() -> Self {
+        Self(())
+    }
 }
 
 impl<T> Recycle<T> for DefaultRecycle
@@ -204,7 +220,27 @@ impl Default for WithCapacity {
 
 feature! {
     #![feature = "alloc"]
-    use alloc::{vec::Vec, string::String, collections::{VecDeque, BinaryHeap}};
+    use alloc::{
+        collections::{VecDeque, BinaryHeap},
+        string::String,
+        sync::Arc,
+        vec::Vec,
+    };
+
+    impl<T, R> Recycle<T> for Arc<R>
+    where
+        R: Recycle<T>,
+    {
+        #[inline]
+        fn new_element(&self) -> T {
+            (**self).new_element()
+        }
+
+        #[inline]
+        fn recycle(&self, element: &mut T) {
+            (**self).recycle(element)
+        }
+    }
 
     impl<T> Recycle<Vec<T>> for WithCapacity {
         fn new_element(&self) -> Vec<T> {

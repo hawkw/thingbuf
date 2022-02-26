@@ -12,6 +12,7 @@
 
 use crate::{
     loom::{atomic::AtomicUsize, hint},
+    recycling::Recycle,
     wait::{Notify, WaitCell, WaitQueue, WaitResult},
     Core, Ref, Slot,
 };
@@ -109,24 +110,25 @@ impl<N> ChannelCore<N>
 where
     N: Notify + Unpin,
 {
-    fn try_send_ref<'a, T>(
+    fn try_send_ref<'a, T, R>(
         &'a self,
         slots: &'a [Slot<T>],
+        recycle: &R,
     ) -> Result<SendRefInner<'a, T, N>, TrySendError>
     where
-        T: Default,
+        R: Recycle<T>,
     {
-        self.core.push_ref(slots).map(|slot| SendRefInner {
+        self.core.push_ref(slots, recycle).map(|slot| SendRefInner {
             _notify: NotifyRx(&self.rx_wait),
             slot,
         })
     }
 
-    fn try_send<T>(&self, slots: &[Slot<T>], val: T) -> Result<(), TrySendError<T>>
+    fn try_send<T, R>(&self, slots: &[Slot<T>], val: T, recycle: &R) -> Result<(), TrySendError<T>>
     where
-        T: Default,
+        R: Recycle<T>,
     {
-        match self.try_send_ref(slots) {
+        match self.try_send_ref(slots, recycle) {
             Ok(mut slot) => {
                 slot.with_mut(|slot| *slot = val);
                 Ok(())
@@ -147,7 +149,6 @@ where
     ) -> Poll<Option<Ref<'a, T>>>
     where
         S: Index<usize, Output = Slot<T>> + ?Sized,
-        T: Default,
     {
         macro_rules! try_poll_recv {
             () => {

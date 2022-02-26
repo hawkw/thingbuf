@@ -2,18 +2,17 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 use core::{cmp, fmt, mem::MaybeUninit, ops, ptr};
-
 #[macro_use]
 mod macros;
 
 mod loom;
 pub mod mpsc;
-pub mod recycle;
+pub mod recycling;
 mod util;
 mod wait;
 
 mod static_thingbuf;
-pub use self::{recycle::Recycle, static_thingbuf::StaticThingBuf};
+pub use self::{recycling::Recycle, static_thingbuf::StaticThingBuf};
 
 #[cfg_attr(docsrs, doc = include_str!("../mpsc_perf_comparison.md"))]
 pub mod mpsc_perf_comparison {
@@ -96,7 +95,6 @@ impl Core {
             closed,
             idx_mask,
             capacity,
-
             has_dropped_slots: false,
         }
     }
@@ -115,7 +113,6 @@ impl Core {
             gen_mask,
             idx_mask,
             capacity,
-
             #[cfg(debug_assertions)]
             has_dropped_slots: false,
         }
@@ -154,12 +151,13 @@ impl Core {
     }
 
     #[inline(always)]
-    fn push_ref<'slots, T, S>(
+    fn push_ref<'slots, T, S, R>(
         &self,
         slots: &'slots S,
+        recycle: &R,
     ) -> Result<Ref<'slots, T>, mpsc::TrySendError<()>>
     where
-        T: Default,
+        R: Recycle<T>,
         S: ops::Index<usize, Output = Slot<T>> + ?Sized,
     {
         test_println!("push_ref");
@@ -189,13 +187,20 @@ impl Core {
                         // Claim exclusive ownership over the slot
                         let ptr = slot.value.get_mut();
 
-                        if gen == 0 {
-                            unsafe {
-                                // Safety: we have just claimed exclusive ownership over
-                                // this slot.
-                                ptr.deref().write(T::default());
-                            };
-                            test_println!("-> initialized");
+                        // Initialize or recycle the element.
+                        unsafe {
+                            // Safety: we have just claimed exclusive ownership over
+                            // this slot.
+                            let ptr = ptr.deref();
+                            if gen == 0 {
+                                ptr.write(recycle.new_element());
+                                test_println!("-> initialized");
+                            } else {
+                                // Safety: if the generation is > 0, then the
+                                // slot has already been initialized.
+                                recycle.recycle(ptr.assume_init_mut());
+                                test_println!("-> recycled");
+                            }
                         }
 
                         return Ok(Ref {
