@@ -226,7 +226,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     {
                         Ok(_) => break,
                         Err(actual) => {
-                            debug_assert!(actual == WAKING || actual == CLOSED);
+                            debug_assert!(actual == EMPTY || actual == WAKING || actual == CLOSED);
                             state = actual;
                         }
                     }
@@ -242,7 +242,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                         // Consumed the wakeup!
                         Ok(_) => return WaitResult::Notified,
                         Err(actual) => {
-                            debug_assert!(actual == EMPTY || actual == CLOSED);
+                            debug_assert!(actual == WAKING || actual == EMPTY || actual == CLOSED);
                             state = actual;
                         }
                     }
