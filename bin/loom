@@ -2,10 +2,17 @@
 
 set -x
 
+TESTCMD=(test)
+
+# if cargo nextest is installed, use it instead!
+if cargo list | grep -q "nextest"; then
+    TESTCMD=(nextest run --cargo-profile loom)
+fi
+
 RUSTFLAGS="--cfg loom ${RUSTFLAGS}" \
 LOOM_LOG="${LOOM_LOG:-info}" \
 LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" \
-cargo test \
+cargo ${TESTCMD[@]} \
     --profile loom \
     --lib \
     "$@"
