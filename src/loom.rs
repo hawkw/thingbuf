@@ -187,6 +187,16 @@ mod inner {
                 Self::new(T::default())
             }
         }
+
+        impl<T: Clone> Clone for Track<T> {
+            fn clone(&self) -> Self {
+                Self::new(self.get_ref().clone())
+            }
+
+            fn clone_from(&mut self, source: &Self) {
+                self.get_mut().clone_from(source.get_ref());
+            }
+        }
     }
 }
 

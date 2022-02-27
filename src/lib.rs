@@ -11,12 +11,17 @@ pub mod recycling;
 mod util;
 mod wait;
 
-mod static_thingbuf;
-pub use self::{recycling::Recycle, static_thingbuf::StaticThingBuf};
+pub use self::recycling::Recycle;
 
 #[cfg_attr(docsrs, doc = include_str!("../mpsc_perf_comparison.md"))]
 pub mod mpsc_perf_comparison {
     // Empty module, used only for documentation.
+}
+
+feature! {
+    #![not(all(loom, test))]
+    mod static_thingbuf;
+    pub use self::static_thingbuf::StaticThingBuf;
 }
 
 feature! {
@@ -25,9 +30,6 @@ feature! {
 
     mod thingbuf;
     pub use self::thingbuf::ThingBuf;
-
-    mod stringbuf;
-    pub use stringbuf::{StaticStringBuf, StringBuf};
 }
 
 use crate::{
