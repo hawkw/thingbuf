@@ -539,25 +539,25 @@ impl<T> List<T> {
     fn enqueue(&mut self, waiter: Pin<&mut Waiter<T>>) {
         test_println!("List::enqueue({:p})", waiter);
 
-        let node = unsafe { Pin::into_inner_unchecked(waiter) };
-        let ptr = NonNull::from(&*node);
-        debug_assert_ne!(
-            self.head,
-            Some(ptr),
-            "tried to enqueue the same waiter twice!"
-        );
-
-        let head = self.head.replace(ptr);
+        let node = unsafe { waiter.get_unchecked_mut() };
+        let head = self.head.take();
         node.with_node(self, |node| {
             node.next = head;
             node.prev = None;
         });
 
+        let ptr = NonNull::from(node);
+        debug_assert_ne!(
+            self.head,
+            Some(ptr),
+            "tried to enqueue the same waiter twice!"
+        );
         if let Some(mut head) = head {
             unsafe {
                 head.as_mut().set_prev(Some(ptr));
             }
         }
+        self.head = Some(ptr);
 
         if self.tail.is_none() {
             self.tail = Some(ptr);
