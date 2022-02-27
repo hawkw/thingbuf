@@ -1,0 +1,30 @@
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.rs'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**.rs'
+
+name: Miri
+jobs:
+  tests:
+    name: Miri tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+          components: miri
+      - name: Run Miri tests
+      - name: miri
+        run: cargo miri test --lib --no-fail-fast
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-tag-raw-pointers

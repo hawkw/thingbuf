@@ -226,7 +226,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     {
                         Ok(_) => break,
                         Err(actual) => {
-                            debug_assert!(actual == WAKING || actual == CLOSED);
+                            debug_assert!(actual == EMPTY || actual == WAKING || actual == CLOSED);
                             state = actual;
                         }
                     }
@@ -242,7 +242,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                         // Consumed the wakeup!
                         Ok(_) => return WaitResult::Notified,
                         Err(actual) => {
-                            debug_assert!(actual == EMPTY || actual == CLOSED);
+                            debug_assert!(actual == WAKING || actual == EMPTY || actual == CLOSED);
                             state = actual;
                         }
                     }
@@ -539,25 +539,25 @@ impl<T> List<T> {
     fn enqueue(&mut self, waiter: Pin<&mut Waiter<T>>) {
         test_println!("List::enqueue({:p})", waiter);
 
-        let node = unsafe { Pin::into_inner_unchecked(waiter) };
-        let ptr = NonNull::from(&*node);
-        debug_assert_ne!(
-            self.head,
-            Some(ptr),
-            "tried to enqueue the same waiter twice!"
-        );
-
-        let head = self.head.replace(ptr);
+        let node = unsafe { waiter.get_unchecked_mut() };
+        let head = self.head.take();
         node.with_node(self, |node| {
             node.next = head;
             node.prev = None;
         });
 
+        let ptr = NonNull::from(node);
+        debug_assert_ne!(
+            self.head,
+            Some(ptr),
+            "tried to enqueue the same waiter twice!"
+        );
         if let Some(mut head) = head {
             unsafe {
                 head.as_mut().set_prev(Some(ptr));
             }
         }
+        self.head = Some(ptr);
 
         if self.tail.is_none() {
             self.tail = Some(ptr);
@@ -632,3 +632,223 @@ impl<T> fmt::Debug for List<T> {
 }
 
 unsafe impl<T: Send> Send for List<T> {}
+
+#[cfg(all(test, not(loom)))]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    #[derive(Debug, Clone)]
+    struct MockNotify(Arc<AtomicBool>);
+
+    impl Notify for MockNotify {
+        fn notify(self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+
+        fn same(&self, &Self(ref other): &Self) -> bool {
+            Arc::ptr_eq(&self.0, other)
+        }
+    }
+
+    impl MockNotify {
+        fn new() -> Self {
+            Self(Arc::new(AtomicBool::new(false)))
+        }
+
+        fn was_notified(&self) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    #[test]
+    fn notify_one() {
+        let q = WaitQueue::new();
+
+        let notify1 = MockNotify::new();
+        let notify2 = MockNotify::new();
+
+        let mut waiter1 = Box::pin(Waiter::new());
+        let mut waiter2 = Box::pin(Waiter::new());
+
+        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert!(waiter1.is_linked());
+
+        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert!(!notify1.was_notified());
+        assert!(!notify2.was_notified());
+
+        assert!(q.notify());
+
+        assert!(notify1.was_notified());
+        assert!(!waiter1.is_linked());
+
+        assert!(!notify2.was_notified());
+        assert!(waiter2.is_linked());
+
+        assert_eq!(
+            q.continue_wait(waiter2.as_mut(), &notify2),
+            WaitResult::Wait
+        );
+
+        assert_eq!(
+            q.continue_wait(waiter1.as_mut(), &notify1),
+            WaitResult::Notified
+        );
+    }
+
+    #[test]
+    fn close() {
+        let q = WaitQueue::new();
+
+        let notify1 = MockNotify::new();
+        let notify2 = MockNotify::new();
+
+        let mut waiter1 = Box::pin(Waiter::new());
+        let mut waiter2 = Box::pin(Waiter::new());
+
+        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert!(waiter1.is_linked());
+
+        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert!(!notify1.was_notified());
+        assert!(!notify2.was_notified());
+
+        q.close();
+
+        assert!(notify1.was_notified());
+        assert!(!waiter1.is_linked());
+
+        assert!(notify2.was_notified());
+        assert!(!waiter2.is_linked());
+
+        assert_eq!(
+            q.continue_wait(waiter2.as_mut(), &notify2),
+            WaitResult::Closed
+        );
+
+        assert_eq!(
+            q.continue_wait(waiter1.as_mut(), &notify1),
+            WaitResult::Closed
+        );
+    }
+
+    #[test]
+    fn remove_from_middle() {
+        let q = WaitQueue::new();
+
+        let notify1 = MockNotify::new();
+        let notify2 = MockNotify::new();
+        let notify3 = MockNotify::new();
+
+        let mut waiter1 = Box::pin(Waiter::new());
+        let mut waiter2 = Box::pin(Waiter::new());
+        let mut waiter3 = Box::pin(Waiter::new());
+
+        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert!(waiter1.is_linked());
+
+        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert_eq!(q.start_wait(waiter3.as_mut(), &notify3), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert!(!notify1.was_notified());
+        assert!(!notify2.was_notified());
+        assert!(!notify3.was_notified());
+
+        waiter2.as_mut().remove(&q);
+        assert!(!notify2.was_notified());
+        drop(waiter2);
+
+        assert!(q.notify());
+
+        assert!(notify1.was_notified());
+        assert!(!waiter1.is_linked());
+
+        assert!(!notify3.was_notified());
+        assert!(waiter3.is_linked());
+
+        assert_eq!(
+            q.continue_wait(waiter3.as_mut(), &notify3),
+            WaitResult::Wait
+        );
+
+        assert_eq!(
+            q.continue_wait(waiter1.as_mut(), &notify1),
+            WaitResult::Notified
+        );
+    }
+
+    #[test]
+    fn remove_after_notify() {
+        let q = WaitQueue::new();
+
+        let notify1 = MockNotify::new();
+        let notify2 = MockNotify::new();
+        let notify3 = MockNotify::new();
+
+        let mut waiter1 = Box::pin(Waiter::new());
+        let mut waiter2 = Box::pin(Waiter::new());
+        let mut waiter3 = Box::pin(Waiter::new());
+
+        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert!(waiter1.is_linked());
+
+        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert_eq!(q.start_wait(waiter3.as_mut(), &notify3), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert!(!notify1.was_notified());
+        assert!(!notify2.was_notified());
+        assert!(!notify3.was_notified());
+
+        assert!(q.notify());
+
+        assert!(notify1.was_notified());
+        assert!(!waiter1.is_linked());
+
+        assert!(!notify2.was_notified());
+        assert!(waiter2.is_linked());
+
+        assert!(!notify3.was_notified());
+        assert!(waiter3.is_linked());
+
+        assert_eq!(
+            q.continue_wait(waiter3.as_mut(), &notify3),
+            WaitResult::Wait
+        );
+
+        assert_eq!(
+            q.continue_wait(waiter2.as_mut(), &notify2),
+            WaitResult::Wait
+        );
+
+        assert_eq!(
+            q.continue_wait(waiter1.as_mut(), &notify1),
+            WaitResult::Notified
+        );
+
+        waiter2.as_mut().remove(&q);
+        assert!(!notify2.was_notified());
+        drop(waiter2);
+
+        assert!(!notify3.was_notified());
+        assert!(waiter3.is_linked());
+
+        assert_eq!(
+            q.continue_wait(waiter3.as_mut(), &notify3),
+            WaitResult::Wait
+        );
+    }
+}
