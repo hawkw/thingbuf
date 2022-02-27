@@ -1,7 +1,5 @@
 use super::*;
-use crate::{
-    loom::{self, alloc::Track, future, thread},
-};
+use crate::loom::{self, alloc::Track, future, thread};
 
 #[test]
 #[cfg_attr(ci_skip_slow_models, ignore)]
