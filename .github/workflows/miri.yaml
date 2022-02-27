@@ -24,7 +24,6 @@ jobs:
           override: true
           components: miri
       - name: Run Miri tests
-      - name: miri
         run: cargo miri test --lib --no-fail-fast
         env:
           MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-tag-raw-pointers
