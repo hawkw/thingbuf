@@ -1,7 +1,6 @@
 use super::*;
 use crate::{
     loom::{self, alloc::Track, future, thread},
-    ThingBuf,
 };
 
 #[test]

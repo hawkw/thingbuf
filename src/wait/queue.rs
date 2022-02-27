@@ -3,10 +3,7 @@ use crate::{
         atomic::{AtomicUsize, Ordering::*},
         cell::UnsafeCell,
     },
-    util::{
-        mutex::{self, Mutex},
-        CachePadded,
-    },
+    util::{mutex::Mutex, CachePadded},
     wait::{Notify, WaitResult},
 };
 
@@ -172,7 +169,7 @@ impl<T> WaitQueue<T> {
     pub(crate) const fn new() -> Self {
         Self {
             state: CachePadded(AtomicUsize::new(EMPTY)),
-            list: mutex::const_mutex(List::new()),
+            list: crate::util::mutex::const_mutex(List::new()),
         }
     }
 }

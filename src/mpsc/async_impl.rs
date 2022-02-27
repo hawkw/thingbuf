@@ -78,6 +78,7 @@ feature! {
 /// }
 /// ```
 /// [`split`]: StaticChannel::split
+#[cfg_attr(all(loom, test), allow(dead_code))]
 pub struct StaticChannel<T, const CAPACITY: usize> {
     core: ChannelCore<Waker>,
     slots: [Slot<T>; CAPACITY],

@@ -77,6 +77,7 @@ pub struct Receiver<T> {
 ///
 /// [async]: crate::mpsc::StaticChannel
 /// [`split`]: StaticChannel::split
+#[cfg_attr(all(loom, test), allow(dead_code))]
 pub struct StaticChannel<T, const CAPACITY: usize> {
     core: ChannelCore<Thread>,
     slots: [Slot<T>; CAPACITY],

@@ -1,8 +1,5 @@
 use super::*;
-use crate::{
-    loom::{self, alloc::Track, thread},
-    ThingBuf,
-};
+use crate::loom::{self, alloc::Track, thread};
 
 #[test]
 // This test currently fails because `loom` implements the wrong semantics for
