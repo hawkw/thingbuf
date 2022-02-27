@@ -739,4 +739,116 @@ mod tests {
             WaitResult::Closed
         );
     }
+
+    #[test]
+    fn remove_from_middle() {
+        let q = WaitQueue::new();
+
+        let notify1 = MockNotify::new();
+        let notify2 = MockNotify::new();
+        let notify3 = MockNotify::new();
+
+        let mut waiter1 = Box::pin(Waiter::new());
+        let mut waiter2 = Box::pin(Waiter::new());
+        let mut waiter3 = Box::pin(Waiter::new());
+
+        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert!(waiter1.is_linked());
+
+        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert_eq!(q.start_wait(waiter3.as_mut(), &notify3), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert!(!notify1.was_notified());
+        assert!(!notify2.was_notified());
+        assert!(!notify3.was_notified());
+
+        waiter2.as_mut().remove(&q);
+        assert!(!notify2.was_notified());
+        drop(waiter2);
+
+        assert!(q.notify());
+
+        assert!(notify1.was_notified());
+        assert!(!waiter1.is_linked());
+
+        assert!(!notify3.was_notified());
+        assert!(waiter3.is_linked());
+
+        assert_eq!(
+            q.continue_wait(waiter3.as_mut(), &notify3),
+            WaitResult::Wait
+        );
+
+        assert_eq!(
+            q.continue_wait(waiter1.as_mut(), &notify1),
+            WaitResult::Notified
+        );
+    }
+
+    #[test]
+    fn remove_after_notify() {
+        let q = WaitQueue::new();
+
+        let notify1 = MockNotify::new();
+        let notify2 = MockNotify::new();
+        let notify3 = MockNotify::new();
+
+        let mut waiter1 = Box::pin(Waiter::new());
+        let mut waiter2 = Box::pin(Waiter::new());
+        let mut waiter3 = Box::pin(Waiter::new());
+
+        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert!(waiter1.is_linked());
+
+        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert_eq!(q.start_wait(waiter3.as_mut(), &notify3), WaitResult::Wait);
+        assert!(waiter2.is_linked());
+
+        assert!(!notify1.was_notified());
+        assert!(!notify2.was_notified());
+        assert!(!notify3.was_notified());
+
+        assert!(q.notify());
+
+        assert!(notify1.was_notified());
+        assert!(!waiter1.is_linked());
+
+        assert!(!notify2.was_notified());
+        assert!(waiter2.is_linked());
+
+        assert!(!notify3.was_notified());
+        assert!(waiter3.is_linked());
+
+        assert_eq!(
+            q.continue_wait(waiter3.as_mut(), &notify3),
+            WaitResult::Wait
+        );
+
+        assert_eq!(
+            q.continue_wait(waiter2.as_mut(), &notify2),
+            WaitResult::Wait
+        );
+
+        assert_eq!(
+            q.continue_wait(waiter1.as_mut(), &notify1),
+            WaitResult::Notified
+        );
+
+        waiter2.as_mut().remove(&q);
+        assert!(!notify2.was_notified());
+        drop(waiter2);
+
+        assert!(!notify3.was_notified());
+        assert!(waiter3.is_linked());
+
+        assert_eq!(
+            q.continue_wait(waiter3.as_mut(), &notify3),
+            WaitResult::Wait
+        );
+    }
 }
