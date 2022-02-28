@@ -10,17 +10,31 @@ use crate::{
         sync::Arc,
         thread::{self, Thread},
     },
+    recycling::{self, Recycle},
     util::Backoff,
     wait::queue,
     Ref,
 };
 use core::{fmt, pin::Pin};
 
-/// Returns a new asynchronous multi-producer, single consumer channel.
-pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
+/// Returns a new synchronous multi-producer, single consumer channel.
+pub fn channel<T: Default + Clone>(capacity: usize) -> (Sender<T>, Receiver<T>) {
+    with_recycle(capacity, recycling::DefaultRecycle::new())
+}
+
+/// Returns a new synchronous multi-producer, single consumer channel with
+/// the provided [recycling policy].
+///
+/// [recycling policy]: crate::recycling::Recycle
+pub fn with_recycle<T, R: Recycle<T>>(
+    capacity: usize,
+    recycle: R,
+) -> (Sender<T, R>, Receiver<T, R>) {
+    assert!(capacity > 0);
     let inner = Arc::new(Inner {
         core: ChannelCore::new(capacity),
         slots: Slot::make_boxed_array(capacity),
+        recycle,
     });
     let tx = Sender {
         inner: inner.clone(),
@@ -30,13 +44,13 @@ pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
 }
 
 #[derive(Debug)]
-pub struct Sender<T> {
-    inner: Arc<Inner<T>>,
+pub struct Sender<T, R = recycling::DefaultRecycle> {
+    inner: Arc<Inner<T, R>>,
 }
 
 #[derive(Debug)]
-pub struct Receiver<T> {
-    inner: Arc<Inner<T>>,
+pub struct Receiver<T, R = recycling::DefaultRecycle> {
+    inner: Arc<Inner<T, R>>,
 }
 
 /// A statically-allocated, blocking bounded MPSC channel.
@@ -78,25 +92,29 @@ pub struct Receiver<T> {
 /// [async]: crate::mpsc::StaticChannel
 /// [`split`]: StaticChannel::split
 #[cfg_attr(all(loom, test), allow(dead_code))]
-pub struct StaticChannel<T, const CAPACITY: usize> {
+pub struct StaticChannel<T, const CAPACITY: usize, R = recycling::DefaultRecycle> {
     core: ChannelCore<Thread>,
     slots: [Slot<T>; CAPACITY],
     is_split: AtomicBool,
+    recycle: R,
 }
 
-pub struct StaticSender<T: 'static> {
+pub struct StaticSender<T: 'static, R: 'static = recycling::DefaultRecycle> {
     core: &'static ChannelCore<Thread>,
     slots: &'static [Slot<T>],
+    recycle: &'static R,
 }
 
-pub struct StaticReceiver<T: 'static> {
+pub struct StaticReceiver<T: 'static, R: 'static = recycling::DefaultRecycle> {
     core: &'static ChannelCore<Thread>,
     slots: &'static [Slot<T>],
+    recycle: &'static R,
 }
 
-struct Inner<T> {
+struct Inner<T, R> {
     core: super::ChannelCore<Thread>,
     slots: Box<[Slot<T>]>,
+    recycle: R,
 }
 
 impl_send_ref! {
@@ -154,9 +172,12 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
             core: ChannelCore::new(CAPACITY),
             slots: Slot::make_static_array::<CAPACITY>(),
             is_split: AtomicBool::new(false),
+            recycle: recycling::DefaultRecycle::new(),
         }
     }
+}
 
+impl<T, R, const CAPACITY: usize> StaticChannel<T, CAPACITY, R> {
     /// Split a [`StaticChannel`] into a [`StaticSender`]/[`StaticReceiver`]
     /// pair.
     ///
@@ -168,7 +189,7 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
     /// # Panics
     ///
     /// If the channel has already been split.
-    pub fn split(&'static self) -> (StaticSender<T>, StaticReceiver<T>) {
+    pub fn split(&'static self) -> (StaticSender<T, R>, StaticReceiver<T, R>) {
         self.try_split().expect("channel already split")
     }
 
@@ -178,17 +199,19 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
     /// A static channel can only be split a single time. If
     /// [`StaticChannel::split`] or [`StaticChannel::try_split`] have been
     /// called previously, this method returns `None`.
-    pub fn try_split(&'static self) -> Option<(StaticSender<T>, StaticReceiver<T>)> {
+    pub fn try_split(&'static self) -> Option<(StaticSender<T, R>, StaticReceiver<T, R>)> {
         self.is_split
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .ok()?;
         let tx = StaticSender {
             core: &self.core,
             slots: &self.slots[..],
+            recycle: &self.recycle,
         };
         let rx = StaticReceiver {
             core: &self.core,
             slots: &self.slots[..],
+            recycle: &self.recycle,
         };
         Some((tx, rx))
     }
@@ -196,20 +219,29 @@ impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
 
 // === impl Sender ===
 
-impl<T: Default> Sender<T> {
+impl<T, R> Sender<T, R>
+where
+    R: Recycle<T>,
+{
     pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
         self.inner
             .core
-            .try_send_ref(self.inner.slots.as_ref())
+            .try_send_ref(self.inner.slots.as_ref(), &self.inner.recycle)
             .map(SendRef)
     }
 
     pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
-        self.inner.core.try_send(self.inner.slots.as_ref(), val)
+        self.inner
+            .core
+            .try_send(self.inner.slots.as_ref(), val, &self.inner.recycle)
     }
 
     pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
-        send_ref(&self.inner.core, self.inner.slots.as_ref())
+        send_ref(
+            &self.inner.core,
+            self.inner.slots.as_ref(),
+            &self.inner.recycle,
+        )
     }
 
     pub fn send(&self, val: T) -> Result<(), Closed<T>> {
@@ -223,7 +255,7 @@ impl<T: Default> Sender<T> {
     }
 }
 
-impl<T> Clone for Sender<T> {
+impl<T, R> Clone for Sender<T, R> {
     fn clone(&self) -> Self {
         test_dbg!(self.inner.core.tx_count.fetch_add(1, Ordering::Relaxed));
         Self {
@@ -232,7 +264,7 @@ impl<T> Clone for Sender<T> {
     }
 }
 
-impl<T> Drop for Sender<T> {
+impl<T, R> Drop for Sender<T, R> {
     fn drop(&mut self) {
         if test_dbg!(self.inner.core.tx_count.fetch_sub(1, Ordering::Release)) > 1 {
             return;
@@ -248,14 +280,17 @@ impl<T> Drop for Sender<T> {
 
 // === impl Receiver ===
 
-impl<T: Default> Receiver<T> {
+impl<T, R> Receiver<T, R> {
     pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
         recv_ref(&self.inner.core, self.inner.slots.as_ref())
     }
 
-    pub fn recv(&self) -> Option<T> {
-        let val = self.recv_ref()?.with_mut(core::mem::take);
-        Some(val)
+    pub fn recv(&self) -> Option<T>
+    where
+        R: Recycle<T>,
+    {
+        let mut val = self.recv_ref()?;
+        Some(recycling::take(&mut *val, &self.inner.recycle))
     }
 
     pub fn is_closed(&self) -> bool {
@@ -263,7 +298,7 @@ impl<T: Default> Receiver<T> {
     }
 }
 
-impl<'a, T: Default> Iterator for &'a Receiver<T> {
+impl<'a, T, R> Iterator for &'a Receiver<T, R> {
     type Item = RecvRef<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -271,7 +306,7 @@ impl<'a, T: Default> Iterator for &'a Receiver<T> {
     }
 }
 
-impl<T> Drop for Receiver<T> {
+impl<T, R> Drop for Receiver<T, R> {
     fn drop(&mut self) {
         self.inner.core.close_rx();
     }
@@ -279,17 +314,22 @@ impl<T> Drop for Receiver<T> {
 
 // === impl StaticSender ===
 
-impl<T: Default> StaticSender<T> {
+impl<T, R> StaticSender<T, R>
+where
+    R: Recycle<T>,
+{
     pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
-        self.core.try_send_ref(self.slots).map(SendRef)
+        self.core
+            .try_send_ref(self.slots, self.recycle)
+            .map(SendRef)
     }
 
     pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
-        self.core.try_send(self.slots, val)
+        self.core.try_send(self.slots, val, self.recycle)
     }
 
     pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
-        send_ref(self.core, self.slots)
+        send_ref(self.core, self.slots, self.recycle)
     }
 
     pub fn send(&self, val: T) -> Result<(), Closed<T>> {
@@ -303,17 +343,18 @@ impl<T: Default> StaticSender<T> {
     }
 }
 
-impl<T> Clone for StaticSender<T> {
+impl<T, R> Clone for StaticSender<T, R> {
     fn clone(&self) -> Self {
         test_dbg!(self.core.tx_count.fetch_add(1, Ordering::Relaxed));
         Self {
             core: self.core,
             slots: self.slots,
+            recycle: self.recycle,
         }
     }
 }
 
-impl<T> Drop for StaticSender<T> {
+impl<T, R> Drop for StaticSender<T, R> {
     fn drop(&mut self) {
         if test_dbg!(self.core.tx_count.fetch_sub(1, Ordering::Release)) > 1 {
             return;
@@ -327,25 +368,29 @@ impl<T> Drop for StaticSender<T> {
     }
 }
 
-impl<T> fmt::Debug for StaticReceiver<T> {
+impl<T, R: fmt::Debug> fmt::Debug for StaticSender<T, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StaticReceiver")
+        f.debug_struct("StaticSender")
             .field("core", &self.core)
             .field("slots", &format_args!("&[..]"))
+            .field("recycle", &self.recycle)
             .finish()
     }
 }
 
-// === impl Receiver ===
+// === impl StaticReceiver ===
 
-impl<T: Default> StaticReceiver<T> {
+impl<T, R> StaticReceiver<T, R> {
     pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
         recv_ref(self.core, self.slots)
     }
 
-    pub fn recv(&self) -> Option<T> {
-        let val = self.recv_ref()?.with_mut(core::mem::take);
-        Some(val)
+    pub fn recv(&self) -> Option<T>
+    where
+        R: Recycle<T>,
+    {
+        let mut val = self.recv_ref()?;
+        Some(recycling::take(&mut *val, self.recycle))
     }
 
     pub fn is_closed(&self) -> bool {
@@ -353,7 +398,7 @@ impl<T: Default> StaticReceiver<T> {
     }
 }
 
-impl<'a, T: Default> Iterator for &'a StaticReceiver<T> {
+impl<'a, T, R> Iterator for &'a StaticReceiver<T, R> {
     type Item = RecvRef<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -361,43 +406,42 @@ impl<'a, T: Default> Iterator for &'a StaticReceiver<T> {
     }
 }
 
-impl<T> Drop for StaticReceiver<T> {
+impl<T, R> Drop for StaticReceiver<T, R> {
     fn drop(&mut self) {
         self.core.close_rx();
     }
 }
 
-impl<T> fmt::Debug for StaticSender<T> {
+impl<T, R: fmt::Debug> fmt::Debug for StaticReceiver<T, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StaticSender")
+        f.debug_struct("StaticReceiver")
             .field("core", &self.core)
             .field("slots", &format_args!("&[..]"))
+            .field("recycle", &self.recycle)
             .finish()
     }
 }
 
 // === impl Inner ===
 
-impl<T> fmt::Debug for Inner<T> {
+impl<T, R: fmt::Debug> fmt::Debug for Inner<T, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Inner")
             .field("core", &self.core)
             .field("slots", &format_args!("Box<[..]>"))
+            .field("recycle", &self.recycle)
             .finish()
     }
 }
 
-impl<T> Drop for Inner<T> {
+impl<T, R> Drop for Inner<T, R> {
     fn drop(&mut self) {
         self.core.core.drop_slots(&mut self.slots[..])
     }
 }
 
 #[inline]
-fn recv_ref<'a, T: Default>(
-    core: &'a ChannelCore<Thread>,
-    slots: &'a [Slot<T>],
-) -> Option<RecvRef<'a, T>> {
+fn recv_ref<'a, T>(core: &'a ChannelCore<Thread>, slots: &'a [Slot<T>]) -> Option<RecvRef<'a, T>> {
     loop {
         match core.poll_recv_ref(slots, thread::current) {
             Poll::Ready(r) => {
@@ -415,13 +459,14 @@ fn recv_ref<'a, T: Default>(
 }
 
 #[inline]
-fn send_ref<'a, T: Default>(
+fn send_ref<'a, T, R: Recycle<T>>(
     core: &'a ChannelCore<Thread>,
     slots: &'a [Slot<T>],
+    recycle: &'a R,
 ) -> Result<SendRef<'a, T>, Closed<()>> {
     // fast path: avoid getting the thread and constructing the node if the
     // slot is immediately ready.
-    match core.try_send_ref(slots) {
+    match core.try_send_ref(slots, recycle) {
         Ok(slot) => return Ok(SendRef(slot)),
         Err(TrySendError::Closed(_)) => return Err(Closed(())),
         _ => {}
@@ -449,7 +494,7 @@ fn send_ref<'a, T: Default>(
             WaitResult::Closed => return Err(Closed(())),
             WaitResult::Notified => {
                 boff.spin_yield();
-                match core.try_send_ref(slots.as_ref()) {
+                match core.try_send_ref(slots.as_ref(), recycle) {
                     Ok(slot) => return Ok(SendRef(slot)),
                     Err(TrySendError::Closed(_)) => return Err(Closed(())),
                     _ => {}

@@ -1,5 +1,8 @@
-use crate::{Core, Full, Ref, Slot};
-use core::{fmt, mem};
+use crate::{
+    recycling::{self, Recycle},
+    Core, Full, Ref, Slot,
+};
+use core::fmt;
 
 /// A statically allocated, fixed-size lock-free multi-producer multi-consumer
 /// queue.
@@ -188,8 +191,9 @@ use core::{fmt, mem};
 /// [`ThingBuf`]: crate::ThingBuf
 /// [vyukov]: https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
 /// [object pool]: https://en.wikipedia.org/wiki/Object_pool_pattern
-pub struct StaticThingBuf<T, const CAP: usize> {
+pub struct StaticThingBuf<T, const CAP: usize, R = recycling::DefaultRecycle> {
     core: Core,
+    recycle: R,
     slots: [Slot<T>; CAP],
 }
 
@@ -199,14 +203,21 @@ pub struct StaticThingBuf<T, const CAP: usize> {
 impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
     /// Returns a new `StaticThingBuf` with space for `capacity` elements.
     pub const fn new() -> Self {
-        Self {
+        Self::with_recycle(recycling::DefaultRecycle::new())
+    }
+}
+
+impl<T, const CAP: usize, R> StaticThingBuf<T, CAP, R> {
+    pub const fn with_recycle(recycle: R) -> Self {
+        StaticThingBuf {
             core: Core::new(CAP),
+            recycle,
             slots: Slot::make_static_array::<CAP>(),
         }
     }
 }
 
-impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
+impl<T, const CAP: usize, R> StaticThingBuf<T, CAP, R> {
     /// Returns the *total* capacity of this queue. This includes both
     /// occupied and unoccupied entries.
     ///
@@ -302,7 +313,10 @@ impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
     }
 }
 
-impl<T: Default, const CAP: usize> StaticThingBuf<T, CAP> {
+impl<T, const CAP: usize, R> StaticThingBuf<T, CAP, R>
+where
+    R: Recycle<T>,
+{
     /// Reserves a slot to push an element into the queue, returning a [`Ref`] that
     /// can be used to write to that slot.
     ///
@@ -343,7 +357,7 @@ impl<T: Default, const CAP: usize> StaticThingBuf<T, CAP> {
     ///
     /// static MESSAGES: StaticThingBuf<Message, 16> = StaticThingBuf::new();
     ///
-    /// #[derive(Default)]
+    /// #[derive(Clone, Default)]
     /// struct Message {
     ///     // ...
     /// }
@@ -380,10 +394,12 @@ impl<T: Default, const CAP: usize> StaticThingBuf<T, CAP> {
     /// [`pop_ref`]: Self::pop_ref
     /// [`push`]: Self::push_ref
     pub fn push_ref(&self) -> Result<Ref<'_, T>, Full> {
-        self.core.push_ref(&self.slots).map_err(|e| match e {
-            crate::mpsc::TrySendError::Full(()) => Full(()),
-            _ => unreachable!(),
-        })
+        self.core
+            .push_ref(&self.slots, &self.recycle)
+            .map_err(|e| match e {
+                crate::mpsc::TrySendError::Full(()) => Full(()),
+                _ => unreachable!(),
+            })
     }
 
     /// Attempt to enqueue an element by value.
@@ -468,7 +484,7 @@ impl<T: Default, const CAP: usize> StaticThingBuf<T, CAP> {
     #[inline]
     pub fn pop(&self) -> Option<T> {
         let mut slot = self.pop_ref()?;
-        Some(mem::take(&mut *slot))
+        Some(recycling::take(&mut *slot, &self.recycle))
     }
 
     /// Dequeue the first element in the queue by reference, and invoke the
@@ -485,17 +501,18 @@ impl<T: Default, const CAP: usize> StaticThingBuf<T, CAP> {
     }
 }
 
-impl<T, const CAP: usize> fmt::Debug for StaticThingBuf<T, CAP> {
+impl<T, const CAP: usize, R: fmt::Debug> fmt::Debug for StaticThingBuf<T, CAP, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StaticThingBuf")
             .field("len", &self.len())
             .field("slots", &format_args!("[...]"))
             .field("core", &self.core)
+            .field("recycle", &self.recycle)
             .finish()
     }
 }
 
-impl<T, const CAP: usize> Drop for StaticThingBuf<T, CAP> {
+impl<T, const CAP: usize, R> Drop for StaticThingBuf<T, CAP, R> {
     fn drop(&mut self) {
         self.core.drop_slots(&mut self.slots[..]);
     }

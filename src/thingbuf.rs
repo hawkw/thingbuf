@@ -1,6 +1,9 @@
-use crate::{Core, Full, Ref, Slot};
+use crate::{
+    recycling::{self, Recycle},
+    Core, Full, Ref, Slot,
+};
 use alloc::boxed::Box;
-use core::{fmt, mem};
+use core::fmt;
 
 #[cfg(all(loom, test))]
 mod tests;
@@ -177,204 +180,22 @@ mod tests;
 /// [vyukov]: https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
 /// [object pool]: https://en.wikipedia.org/wiki/Object_pool_pattern
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-pub struct ThingBuf<T> {
+pub struct ThingBuf<T, R = recycling::DefaultRecycle> {
     pub(crate) core: Core,
     pub(crate) slots: Box<[Slot<T>]>,
+    recycle: R,
 }
 
 // === impl ThingBuf ===
 
-impl<T: Default> ThingBuf<T> {
+impl<T: Default + Clone> ThingBuf<T> {
     /// Returns a new `ThingBuf` with space for `capacity` elements.
     pub fn new(capacity: usize) -> Self {
-        assert!(capacity > 0);
-        Self {
-            core: Core::new(capacity),
-            slots: Slot::make_boxed_array(capacity),
-        }
-    }
-
-    /// Reserves a slot to push an element into the queue, returning a [`Ref`] that
-    /// can be used to write to that slot.
-    ///
-    /// This can be used to reuse allocations for queue elements in place,
-    /// by clearing previous data prior to writing. In order to ensure
-    /// allocations can be reused in place, elements should be dequeued using
-    /// [`pop_ref`] rather than [`pop`]. If values are expensive to produce,
-    /// `push_ref` can also be used to avoid producing a value if there is no
-    /// capacity for it in the queue.
-    ///
-    /// For values that don't own heap allocations, or heap allocated values
-    /// that cannot be reused in place, [`push`] can also be used.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(`[`Ref`]`)` if there is space for a new element
-    /// - `Err(`[`Full`]`)`, if there is no capacity remaining in the queue
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use thingbuf::ThingBuf;
-    ///
-    /// let q = ThingBuf::new(1);
-    ///
-    /// // Reserve a `Ref` and enqueue an element.
-    /// *q.push_ref().expect("queue should have capacity") = 10;
-    ///
-    /// // Now that the queue has one element in it, a subsequent `push_ref`
-    /// // call will fail.
-    /// assert!(q.push_ref().is_err());
-    /// ```
-    ///
-    /// Avoiding producing an expensive element when the queue is at capacity:
-    ///
-    /// ```rust
-    /// use thingbuf::ThingBuf;
-    ///
-    /// #[derive(Default)]
-    /// struct Message {
-    ///     // ...
-    /// }
-    ///
-    /// fn make_expensive_message() -> Message {
-    ///     // Imagine this function performs some costly operation, or acquires
-    ///     // a limited resource...
-    ///     # Message::default()
-    /// }
-    ///
-    /// fn enqueue_message(q: &ThingBuf<Message>) {
-    ///     loop {
-    ///         match q.push_ref() {
-    //              // If `push_ref` returns `Ok`, we've reserved a slot in
-    ///             // the queue for our message, so it's okay to generate
-    ///             // the expensive message.
-    ///             Ok(mut slot) => {
-    ///                 *slot = make_expensive_message();
-    ///                 return;
-    ///             },
-    ///
-    ///             // If there's no space in the queue, avoid generating
-    ///             // an expensive message that won't be sent.
-    ///             Err(_) => {
-    ///                 // Wait until the queue has capacity...
-    ///                 std::thread::yield_now();
-    ///             }
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// [`pop`]: Self::pop
-    /// [`pop_ref`]: Self::pop_ref
-    /// [`push`]: Self::push_ref
-    pub fn push_ref(&self) -> Result<Ref<'_, T>, Full> {
-        self.core.push_ref(&*self.slots).map_err(|e| match e {
-            crate::mpsc::TrySendError::Full(()) => Full(()),
-            _ => unreachable!(),
-        })
-    }
-
-    /// Attempt to enqueue an element by value.
-    ///
-    /// If the queue is full, the element is returned in the [`Full`] error.
-    ///
-    /// Unlike [`push_ref`], this method does not enable the reuse of previously
-    /// allocated elements. If allocations are being reused by using
-    /// [`push_ref`] and [`pop_ref`], this method should not be used, as it will
-    /// drop pooled allocations.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(())` if the element was enqueued
-    /// - `Err(`[`Full`]`)`, containing the value, if there is no capacity
-    ///   remaining in the queue
-    ///
-    /// [`push_ref`]: Self::push_ref
-    /// [`pop_ref`]: Self::pop_ref
-    #[inline]
-    pub fn push(&self, val: T) -> Result<(), Full<T>> {
-        match self.push_ref() {
-            Err(_) => Err(Full(val)),
-            Ok(mut slot) => {
-                *slot = val;
-                Ok(())
-            }
-        }
-    }
-
-    /// Reserves a slot to push an element into the queue, and invokes the
-    /// provided function `f` with a mutable reference to that element.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(U)` containing the return value of the provided function, if the
-    ///   element was enqueued
-    /// - `Err(`[`Full`]`)`, if there is no capacity remaining in the queue
-    #[inline]
-    pub fn push_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Result<U, Full> {
-        self.push_ref().map(|mut r| r.with_mut(f))
-    }
-
-    /// Dequeue the first element in the queue, returning a [`Ref`] that can be
-    /// used to read from (or mutate) the element.
-    ///
-    /// **Note**: A `ThingBuf` is *not* a "broadcast"-style queue. Each element
-    /// is dequeued a single time. Once a thread has dequeued a given element,
-    /// it is no longer the head of the queue.
-    ///
-    /// This can be used to reuse allocations for queue elements in place,
-    /// by clearing previous data prior to writing. In order to ensure
-    /// allocations can be reused in place, elements should be enqueued using
-    /// [`push_ref`] rather than [`push`].
-    ///
-    /// For values that don't own heap allocations, or heap allocated values
-    /// that cannot be reused in place, [`pop`] can also be used.
-    ///
-    /// # Returns
-    ///
-    /// - `Some(`[`Ref<T>`](Ref)`)` if an element was dequeued
-    /// - `None` if there are no elements in the queue
-    ///
-    /// [`push_ref`]: Self::push_ref
-    /// [`push`]: Self::push
-    /// [`pop`]: Self::pop
-    pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
-        self.core.pop_ref(&*self.slots).ok()
-    }
-
-    /// Dequeue the first element in the queue *by value*, moving it out of the
-    /// queue.
-    ///
-    /// **Note**: A `ThingBuf` is *not* a "broadcast"-style queue. Each element
-    /// is dequeued a single time. Once a thread has dequeued a given element,
-    /// it is no longer the head of the queue.
-    ///
-    /// # Returns
-    ///
-    /// - `Some(T)` if an element was dequeued
-    /// - `None` if there are no elements in the queue
-    #[inline]
-    pub fn pop(&self) -> Option<T> {
-        let mut slot = self.pop_ref()?;
-        Some(mem::take(&mut *slot))
-    }
-
-    /// Dequeue the first element in the queue by reference, and invoke the
-    /// provided function `f` with a mutable reference to the dequeued element.
-    ///
-    /// # Returns
-    ///
-    /// - `Some(U)` containing the return value of the provided function, if the
-    ///   element was dequeued
-    /// - `None` if the queue is empty
-    #[inline]
-    pub fn pop_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
-        self.pop_ref().map(|mut r| r.with_mut(f))
+        Self::with_recycle(capacity, recycling::DefaultRecycle::new())
     }
 }
 
-impl<T> ThingBuf<T> {
+impl<T, R> ThingBuf<T, R> {
     /// Returns the *total* capacity of this queue. This includes both
     /// occupied and unoccupied entries.
     ///
@@ -471,18 +292,214 @@ impl<T> ThingBuf<T> {
     }
 }
 
-impl<T> Drop for ThingBuf<T> {
+impl<T, R> ThingBuf<T, R>
+where
+    R: Recycle<T>,
+{
+    pub fn with_recycle(capacity: usize, recycle: R) -> Self {
+        assert!(capacity > 0);
+        Self {
+            core: Core::new(capacity),
+            slots: Slot::make_boxed_array(capacity),
+            recycle,
+        }
+    }
+
+    /// Reserves a slot to push an element into the queue, returning a [`Ref`] that
+    /// can be used to write to that slot.
+    ///
+    /// This can be used to reuse allocations for queue elements in place,
+    /// by clearing previous data prior to writing. In order to ensure
+    /// allocations can be reused in place, elements should be dequeued using
+    /// [`pop_ref`] rather than [`pop`]. If values are expensive to produce,
+    /// `push_ref` can also be used to avoid producing a value if there is no
+    /// capacity for it in the queue.
+    ///
+    /// For values that don't own heap allocations, or heap allocated values
+    /// that cannot be reused in place, [`push`] can also be used.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(`[`Ref`]`)` if there is space for a new element
+    /// - `Err(`[`Full`]`)`, if there is no capacity remaining in the queue
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use thingbuf::ThingBuf;
+    ///
+    /// let q = ThingBuf::new(1);
+    ///
+    /// // Reserve a `Ref` and enqueue an element.
+    /// *q.push_ref().expect("queue should have capacity") = 10;
+    ///
+    /// // Now that the queue has one element in it, a subsequent `push_ref`
+    /// // call will fail.
+    /// assert!(q.push_ref().is_err());
+    /// ```
+    ///
+    /// Avoiding producing an expensive element when the queue is at capacity:
+    ///
+    /// ```rust
+    /// use thingbuf::ThingBuf;
+    ///
+    /// #[derive(Clone, Default)]
+    /// struct Message {
+    ///     // ...
+    /// }
+    ///
+    /// fn make_expensive_message() -> Message {
+    ///     // Imagine this function performs some costly operation, or acquires
+    ///     // a limited resource...
+    ///     # Message::default()
+    /// }
+    ///
+    /// fn enqueue_message(q: &ThingBuf<Message>) {
+    ///     loop {
+    ///         match q.push_ref() {
+    //              // If `push_ref` returns `Ok`, we've reserved a slot in
+    ///             // the queue for our message, so it's okay to generate
+    ///             // the expensive message.
+    ///             Ok(mut slot) => {
+    ///                 *slot = make_expensive_message();
+    ///                 return;
+    ///             },
+    ///
+    ///             // If there's no space in the queue, avoid generating
+    ///             // an expensive message that won't be sent.
+    ///             Err(_) => {
+    ///                 // Wait until the queue has capacity...
+    ///                 std::thread::yield_now();
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// [`pop`]: Self::pop
+    /// [`pop_ref`]: Self::pop_ref
+    /// [`push`]: Self::push_ref
+    pub fn push_ref(&self) -> Result<Ref<'_, T>, Full> {
+        self.core
+            .push_ref(&*self.slots, &self.recycle)
+            .map_err(|e| match e {
+                crate::mpsc::TrySendError::Full(()) => Full(()),
+                _ => unreachable!(),
+            })
+    }
+
+    /// Attempt to enqueue an element by value.
+    ///
+    /// If the queue is full, the element is returned in the [`Full`] error.
+    ///
+    /// Unlike [`push_ref`], this method does not enable the reuse of previously
+    /// allocated elements. If allocations are being reused by using
+    /// [`push_ref`] and [`pop_ref`], this method should not be used, as it will
+    /// drop pooled allocations.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the element was enqueued
+    /// - `Err(`[`Full`]`)`, containing the value, if there is no capacity
+    ///   remaining in the queue
+    ///
+    /// [`push_ref`]: Self::push_ref
+    /// [`pop_ref`]: Self::pop_ref
+    #[inline]
+    pub fn push(&self, val: T) -> Result<(), Full<T>> {
+        match self.push_ref() {
+            Err(_) => Err(Full(val)),
+            Ok(mut slot) => {
+                *slot = val;
+                Ok(())
+            }
+        }
+    }
+
+    /// Reserves a slot to push an element into the queue, and invokes the
+    /// provided function `f` with a mutable reference to that element.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(U)` containing the return value of the provided function, if the
+    ///   element was enqueued
+    /// - `Err(`[`Full`]`)`, if there is no capacity remaining in the queue
+    #[inline]
+    pub fn push_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Result<U, Full> {
+        self.push_ref().map(|mut r| r.with_mut(f))
+    }
+
+    /// Dequeue the first element in the queue, returning a [`Ref`] that can be
+    /// used to read from (or mutate) the element.
+    ///
+    /// **Note**: A `ThingBuf` is *not* a "broadcast"-style queue. Each element
+    /// is dequeued a single time. Once a thread has dequeued a given element,
+    /// it is no longer the head of the queue.
+    ///
+    /// This can be used to reuse allocations for queue elements in place,
+    /// by clearing previous data prior to writing. In order to ensure
+    /// allocations can be reused in place, elements should be enqueued using
+    /// [`push_ref`] rather than [`push`].
+    ///
+    /// For values that don't own heap allocations, or heap allocated values
+    /// that cannot be reused in place, [`pop`] can also be used.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(`[`Ref<T>`](Ref)`)` if an element was dequeued
+    /// - `None` if there are no elements in the queue
+    ///
+    /// [`push_ref`]: Self::push_ref
+    /// [`push`]: Self::push
+    /// [`pop`]: Self::pop
+    pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
+        self.core.pop_ref(&*self.slots).ok()
+    }
+
+    /// Dequeue the first element in the queue *by value*, moving it out of the
+    /// queue.
+    ///
+    /// **Note**: A `ThingBuf` is *not* a "broadcast"-style queue. Each element
+    /// is dequeued a single time. Once a thread has dequeued a given element,
+    /// it is no longer the head of the queue.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(T)` if an element was dequeued
+    /// - `None` if there are no elements in the queue
+    #[inline]
+    pub fn pop(&self) -> Option<T> {
+        let mut slot = self.pop_ref()?;
+        Some(recycling::take(&mut *slot, &self.recycle))
+    }
+
+    /// Dequeue the first element in the queue by reference, and invoke the
+    /// provided function `f` with a mutable reference to the dequeued element.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(U)` containing the return value of the provided function, if the
+    ///   element was dequeued
+    /// - `None` if the queue is empty
+    #[inline]
+    pub fn pop_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
+        self.pop_ref().map(|mut r| r.with_mut(f))
+    }
+}
+
+impl<T, R> Drop for ThingBuf<T, R> {
     fn drop(&mut self) {
         self.core.drop_slots(&mut self.slots[..]);
     }
 }
 
-impl<T> fmt::Debug for ThingBuf<T> {
+impl<T, R: fmt::Debug> fmt::Debug for ThingBuf<T, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ThingBuf")
             .field("len", &self.len())
             .field("slots", &format_args!("[...]"))
             .field("core", &self.core)
+            .field("recycle", &self.recycle)
             .finish()
     }
 }
