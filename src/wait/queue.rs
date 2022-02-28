@@ -674,29 +674,29 @@ mod tests {
         let mut waiter1 = Box::pin(Waiter::new());
         let mut waiter2 = Box::pin(Waiter::new());
 
-        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
-        assert!(waiter1.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert_dbg!(waiter1.is_linked());
 
-        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
-        assert!(waiter2.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert_dbg!(waiter2.is_linked());
 
-        assert!(!notify1.was_notified());
-        assert!(!notify2.was_notified());
+        assert_dbg!(!notify1.was_notified());
+        assert_dbg!(!notify2.was_notified());
 
-        assert!(q.notify());
+        assert_dbg!(q.notify());
 
-        assert!(notify1.was_notified());
-        assert!(!waiter1.is_linked());
+        assert_dbg!(notify1.was_notified());
+        assert_dbg!(!waiter1.is_linked());
 
-        assert!(!notify2.was_notified());
-        assert!(waiter2.is_linked());
+        assert_dbg!(!notify2.was_notified());
+        assert_dbg!(waiter2.is_linked());
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter2.as_mut(), &notify2),
             WaitResult::Wait
         );
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter1.as_mut(), &notify1),
             WaitResult::Notified
         );
@@ -712,29 +712,29 @@ mod tests {
         let mut waiter1 = Box::pin(Waiter::new());
         let mut waiter2 = Box::pin(Waiter::new());
 
-        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
-        assert!(waiter1.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert_dbg!(waiter1.is_linked());
 
-        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
-        assert!(waiter2.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert_dbg!(waiter2.is_linked());
 
-        assert!(!notify1.was_notified());
-        assert!(!notify2.was_notified());
+        assert_dbg!(!notify1.was_notified());
+        assert_dbg!(!notify2.was_notified());
 
         q.close();
 
-        assert!(notify1.was_notified());
-        assert!(!waiter1.is_linked());
+        assert_dbg!(notify1.was_notified());
+        assert_dbg!(!waiter1.is_linked());
 
-        assert!(notify2.was_notified());
-        assert!(!waiter2.is_linked());
+        assert_dbg!(notify2.was_notified());
+        assert_dbg!(!waiter2.is_linked());
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter2.as_mut(), &notify2),
             WaitResult::Closed
         );
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter1.as_mut(), &notify1),
             WaitResult::Closed
         );
@@ -752,37 +752,37 @@ mod tests {
         let mut waiter2 = Box::pin(Waiter::new());
         let mut waiter3 = Box::pin(Waiter::new());
 
-        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
-        assert!(waiter1.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert_dbg!(waiter1.is_linked());
 
-        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
-        assert!(waiter2.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert_dbg!(waiter2.is_linked());
 
-        assert_eq!(q.start_wait(waiter3.as_mut(), &notify3), WaitResult::Wait);
-        assert!(waiter2.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter3.as_mut(), &notify3), WaitResult::Wait);
+        assert_dbg!(waiter2.is_linked());
 
-        assert!(!notify1.was_notified());
-        assert!(!notify2.was_notified());
-        assert!(!notify3.was_notified());
+        assert_dbg!(!notify1.was_notified());
+        assert_dbg!(!notify2.was_notified());
+        assert_dbg!(!notify3.was_notified());
 
         waiter2.as_mut().remove(&q);
-        assert!(!notify2.was_notified());
+        assert_dbg!(!notify2.was_notified());
         drop(waiter2);
 
-        assert!(q.notify());
+        assert_dbg!(q.notify());
 
-        assert!(notify1.was_notified());
-        assert!(!waiter1.is_linked());
+        assert_dbg!(notify1.was_notified());
+        assert_dbg!(!waiter1.is_linked());
 
-        assert!(!notify3.was_notified());
-        assert!(waiter3.is_linked());
+        assert_dbg!(!notify3.was_notified());
+        assert_dbg!(waiter3.is_linked());
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter3.as_mut(), &notify3),
             WaitResult::Wait
         );
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter1.as_mut(), &notify1),
             WaitResult::Notified
         );
@@ -800,53 +800,53 @@ mod tests {
         let mut waiter2 = Box::pin(Waiter::new());
         let mut waiter3 = Box::pin(Waiter::new());
 
-        assert_eq!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
-        assert!(waiter1.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter1.as_mut(), &notify1), WaitResult::Wait);
+        assert_dbg!(waiter1.is_linked());
 
-        assert_eq!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
-        assert!(waiter2.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter2.as_mut(), &notify2), WaitResult::Wait);
+        assert_dbg!(waiter2.is_linked());
 
-        assert_eq!(q.start_wait(waiter3.as_mut(), &notify3), WaitResult::Wait);
-        assert!(waiter2.is_linked());
+        assert_eq_dbg!(q.start_wait(waiter3.as_mut(), &notify3), WaitResult::Wait);
+        assert_dbg!(waiter2.is_linked());
 
-        assert!(!notify1.was_notified());
-        assert!(!notify2.was_notified());
-        assert!(!notify3.was_notified());
+        assert_dbg!(!notify1.was_notified());
+        assert_dbg!(!notify2.was_notified());
+        assert_dbg!(!notify3.was_notified());
 
-        assert!(q.notify());
+        assert_dbg!(q.notify());
 
-        assert!(notify1.was_notified());
-        assert!(!waiter1.is_linked());
+        assert_dbg!(notify1.was_notified());
+        assert_dbg!(!waiter1.is_linked());
 
-        assert!(!notify2.was_notified());
-        assert!(waiter2.is_linked());
+        assert_dbg!(!notify2.was_notified());
+        assert_dbg!(waiter2.is_linked());
 
-        assert!(!notify3.was_notified());
-        assert!(waiter3.is_linked());
+        assert_dbg!(!notify3.was_notified());
+        assert_dbg!(waiter3.is_linked());
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter3.as_mut(), &notify3),
             WaitResult::Wait
         );
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter2.as_mut(), &notify2),
             WaitResult::Wait
         );
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter1.as_mut(), &notify1),
             WaitResult::Notified
         );
 
         waiter2.as_mut().remove(&q);
-        assert!(!notify2.was_notified());
+        assert_dbg!(!notify2.was_notified());
         drop(waiter2);
 
-        assert!(!notify3.was_notified());
-        assert!(waiter3.is_linked());
+        assert_dbg!(!notify3.was_notified());
+        assert_dbg!(waiter3.is_linked());
 
-        assert_eq!(
+        assert_eq_dbg!(
             q.continue_wait(waiter3.as_mut(), &notify3),
             WaitResult::Wait
         );

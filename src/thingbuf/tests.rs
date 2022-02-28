@@ -47,7 +47,7 @@ fn push_many_mpsc() {
 
         test_dbg!(&all_vals);
         for &val in T1_VALS.iter().chain(T2_VALS.iter()) {
-            assert!(all_vals.contains(&test_dbg!(val).to_string()))
+            assert_dbg!(all_vals.contains(&test_dbg!(val).to_string()))
         }
 
         assert_eq!(all_vals.len(), T1_VALS.len() + T2_VALS.len());
