@@ -119,7 +119,7 @@ pub struct DefaultRecycle(());
 /// // Because `MyCollection<T>` has `with_capacity`, `shrink_to`, and `clear` methods,
 /// // we can implement `Recycle<MyCollection<T>>` for `WithCapacity` exactly the same
 /// // way as it is implemented for standard library collections.
-/// impl<T> Recycle<MyCollection<T>> for recycle::WithCapacity {
+/// impl<T> Recycle<MyCollection<T>> for recycling::WithCapacity {
 ///     fn new_element(&self) -> MyCollection<T> {
 ///         // Allocate a new element with the minimum initial capacity:
 ///         MyCollection::with_capacity(self.min_capacity())
