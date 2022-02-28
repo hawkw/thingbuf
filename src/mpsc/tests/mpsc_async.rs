@@ -27,7 +27,7 @@ fn mpsc_try_send_recv() {
         });
 
         vals.sort_unstable();
-        assert_eq!(vals, vec![1, 2, 3]);
+        assert_eq_dbg!(vals, vec![1, 2, 3]);
 
         p1.join().unwrap();
         p2.join().unwrap();
@@ -63,7 +63,7 @@ fn rx_closes() {
                 let n = rx.recv().await;
 
                 test_println!("recv {:?}\n", n);
-                assert_eq!(n, Some(i));
+                assert_eq_dbg!(n, Some(i));
             }
         });
 
@@ -85,7 +85,7 @@ fn rx_close_unconsumed_spsc() {
                 // recieve one message
                 let msg = rx.recv().await;
                 test_println!("recv {:?}", msg);
-                assert!(msg.is_some());
+                assert_dbg!(msg.is_some());
                 // drop the receiver...
             })
         });
@@ -125,7 +125,7 @@ fn rx_close_unconsumed_mpsc() {
                 // recieve one message
                 let msg = rx.recv().await;
                 test_println!("recv {:?}", msg);
-                assert!(msg.is_some());
+                assert_dbg!(msg.is_some());
                 // drop the receiver...
             })
         });
@@ -148,7 +148,7 @@ fn spsc_recv_then_send() {
         let (tx, rx) = channel::<i32>(4);
         let consumer = thread::spawn(move || {
             future::block_on(async move {
-                assert_eq!(rx.recv().await.unwrap(), 10);
+                assert_eq_dbg!(rx.recv().await.unwrap(), 10);
             })
         });
 
@@ -167,7 +167,7 @@ fn spsc_recv_then_close() {
 
         future::block_on(async move {
             let recv = rx.recv().await;
-            assert_eq!(recv, None);
+            assert_eq_dbg!(recv, None);
         });
 
         producer.join().unwrap();
@@ -180,9 +180,9 @@ fn spsc_recv_then_send_then_close() {
         let (tx, rx) = channel::<i32>(2);
         let consumer = thread::spawn(move || {
             future::block_on(async move {
-                assert_eq!(rx.recv().await.unwrap(), 10);
-                assert_eq!(rx.recv().await.unwrap(), 20);
-                assert_eq!(rx.recv().await, None);
+                assert_eq_dbg!(rx.recv().await.unwrap(), 10);
+                assert_eq_dbg!(rx.recv().await.unwrap(), 20);
+                assert_eq_dbg!(rx.recv().await, None);
             })
         });
 
@@ -201,9 +201,9 @@ fn spsc_send_recv_in_order_no_wrap() {
         let consumer = thread::spawn(move || {
             future::block_on(async move {
                 for i in 1..=N_SENDS {
-                    assert_eq!(rx.recv().await, Some(i));
+                    assert_eq_dbg!(rx.recv().await, Some(i));
                 }
-                assert_eq!(rx.recv().await, None);
+                assert_eq_dbg!(rx.recv().await, None);
             })
         });
         future::block_on(async move {
@@ -223,9 +223,9 @@ fn spsc_send_recv_in_order_wrap() {
         let consumer = thread::spawn(move || {
             future::block_on(async move {
                 for i in 1..=N_SENDS {
-                    assert_eq!(rx.recv().await, Some(i));
+                    assert_eq_dbg!(rx.recv().await, Some(i));
                 }
-                assert_eq!(rx.recv().await, None);
+                assert_eq_dbg!(rx.recv().await, None);
             })
         });
         future::block_on(async move {
@@ -257,14 +257,14 @@ fn mpsc_send_recv_wrap() {
         producer1.join().expect("producer 1 panicked");
         producer2.join().expect("producer 2 panicked");
 
-        assert_eq!(results.len(), 2);
-        assert!(
+        assert_eq_dbg!(results.len(), 2);
+        assert_dbg!(
             results.contains(&10),
             "missing value from producer 1; results={:?}",
             results
         );
 
-        assert!(
+        assert_dbg!(
             results.contains(&20),
             "missing value from producer 2; results={:?}",
             results
@@ -291,14 +291,14 @@ fn mpsc_send_recv_no_wrap() {
         producer1.join().expect("producer 1 panicked");
         producer2.join().expect("producer 2 panicked");
 
-        assert_eq!(results.len(), 2);
-        assert!(
+        assert_eq_dbg!(results.len(), 2);
+        assert_dbg!(
             results.contains(&10),
             "missing value from producer 1; results={:?}",
             results
         );
 
-        assert!(
+        assert_dbg!(
             results.contains(&20),
             "missing value from producer 2; results={:?}",
             results
@@ -322,7 +322,7 @@ fn tx_close_wakes() {
         let (tx, rx) = channel::<i32>(2);
         let consumer = thread::spawn(move || {
             future::block_on(async move {
-                assert_eq!(rx.recv().await, None);
+                assert_eq_dbg!(rx.recv().await, None);
             })
         });
         drop(tx);
@@ -345,7 +345,7 @@ fn tx_close_drains_queue() {
 
         future::block_on(async move {
             for i in 0..LEN {
-                assert_eq!(rx.recv().await, Some(i))
+                assert_eq_dbg!(rx.recv().await, Some(i))
             }
         });
 

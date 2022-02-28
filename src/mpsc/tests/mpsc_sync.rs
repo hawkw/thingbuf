@@ -33,7 +33,7 @@ fn mpsc_try_send_recv() {
         }
 
         vals.sort_unstable();
-        assert_eq!(vals, vec![1, 2, 3]);
+        assert_eq_dbg!(vals, vec![1, 2, 3]);
 
         p1.join().unwrap();
         p2.join().unwrap();
@@ -67,7 +67,7 @@ fn rx_closes() {
             let n = rx.recv();
 
             test_println!("recv {:?}\n", n);
-            assert_eq!(n, Some(i));
+            assert_eq_dbg!(n, Some(i));
         }
         drop(rx);
 
@@ -88,7 +88,7 @@ fn rx_close_unconsumed_spsc() {
             // recieve one message
             let msg = rx.recv();
             test_println!("recv {:?}", msg);
-            assert!(msg.is_some());
+            assert_dbg!(msg.is_some());
             // drop the receiver...
         });
 
@@ -127,7 +127,7 @@ fn rx_close_unconsumed_mpsc() {
             // recieve one message
             let msg = rx.recv();
             test_println!("recv {:?}", msg);
-            assert!(msg.is_some());
+            assert_dbg!(msg.is_some());
             // drop the receiver...
         });
 
@@ -145,7 +145,7 @@ fn spsc_recv_then_try_send() {
     loom::model(|| {
         let (tx, rx) = sync::channel::<i32>(4);
         let consumer = thread::spawn(move || {
-            assert_eq!(rx.recv().unwrap(), 10);
+            assert_eq_dbg!(rx.recv().unwrap(), 10);
         });
 
         tx.try_send(10).unwrap();
@@ -161,7 +161,7 @@ fn spsc_recv_then_close() {
             drop(tx);
         });
 
-        assert_eq!(rx.recv(), None);
+        assert_eq_dbg!(rx.recv(), None);
 
         producer.join().unwrap();
     });
@@ -172,9 +172,9 @@ fn spsc_recv_then_try_send_then_close() {
     loom::model(|| {
         let (tx, rx) = sync::channel::<i32>(2);
         let consumer = thread::spawn(move || {
-            assert_eq!(rx.recv().unwrap(), 10);
-            assert_eq!(rx.recv().unwrap(), 20);
-            assert_eq!(rx.recv(), None);
+            assert_eq_dbg!(rx.recv().unwrap(), 10);
+            assert_eq_dbg!(rx.recv().unwrap(), 20);
+            assert_eq_dbg!(rx.recv(), None);
         });
 
         tx.try_send(10).unwrap();
@@ -209,14 +209,14 @@ fn mpsc_send_recv_wrap() {
         producer1.join().expect("producer 1 panicked");
         producer2.join().expect("producer 2 panicked");
 
-        assert_eq!(results.len(), 2);
-        assert!(
+        assert_eq_dbg!(results.len(), 2);
+        assert_dbg!(
             results.contains(&10),
             "missing value from producer 1; results={:?}",
             results
         );
 
-        assert!(
+        assert_dbg!(
             results.contains(&20),
             "missing value from producer 2; results={:?}",
             results
@@ -240,14 +240,14 @@ fn mpsc_send_recv_no_wrap() {
         producer1.join().expect("producer 1 panicked");
         producer2.join().expect("producer 2 panicked");
 
-        assert_eq!(results.len(), 2);
-        assert!(
+        assert_eq_dbg!(results.len(), 2);
+        assert_dbg!(
             results.contains(&10),
             "missing value from producer 1; results={:?}",
             results
         );
 
-        assert!(
+        assert_dbg!(
             results.contains(&20),
             "missing value from producer 2; results={:?}",
             results
@@ -270,9 +270,9 @@ fn spsc_send_recv_in_order_no_wrap() {
         let (tx, rx) = sync::channel::<usize>(N_SENDS);
         let consumer = thread::spawn(move || {
             for i in 1..=N_SENDS {
-                assert_eq!(rx.recv(), Some(i));
+                assert_eq_dbg!(rx.recv(), Some(i));
             }
-            assert_eq!(rx.recv(), None);
+            assert_eq_dbg!(rx.recv(), None);
         });
 
         for i in 1..=N_SENDS {
@@ -299,9 +299,9 @@ fn spsc_send_recv_in_order_wrap() {
         let (tx, rx) = sync::channel::<usize>(N_SENDS / 2);
         let consumer = thread::spawn(move || {
             for i in 1..=N_SENDS {
-                assert_eq!(rx.recv(), Some(i));
+                assert_eq_dbg!(rx.recv(), Some(i));
             }
-            assert_eq!(rx.recv(), None);
+            assert_eq_dbg!(rx.recv(), None);
         });
 
         for i in 1..=N_SENDS {
@@ -317,7 +317,7 @@ fn tx_close_wakes() {
     loom::model(|| {
         let (tx, rx) = sync::channel::<i32>(2);
         let consumer = thread::spawn(move || {
-            assert_eq!(rx.recv(), None);
+            assert_eq_dbg!(rx.recv(), None);
         });
         drop(tx);
         consumer.join().unwrap();
@@ -336,7 +336,7 @@ fn tx_close_drains_queue() {
         });
 
         for i in 0..LEN {
-            assert_eq!(rx.recv(), Some(i))
+            assert_eq_dbg!(rx.recv(), Some(i))
         }
 
         producer.join().unwrap();
