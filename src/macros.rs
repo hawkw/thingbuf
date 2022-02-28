@@ -39,10 +39,12 @@ macro_rules! assert_dbg {
         assert_dbg!(@ $e, " ({})", format_args!($($msg)+))
     };
     (@$e:expr, $($msg:tt)+) => {
-        #[cfg(any(test, all(thingbuf_trace, feature = "std")))]
-        test_println!("ASSERT: {}{}", stringify!($e), format_args!($($msg)*));
-        assert!($e, $($msg)*);
-        test_println!("-> ok");
+        {
+            #[cfg(any(test, all(thingbuf_trace, feature = "std")))]
+            test_println!("ASSERT: {}{}", stringify!($e), format_args!($($msg)*));
+            assert!($e, $($msg)*);
+            test_println!("-> ok");
+        }
     }
 }
 
@@ -55,10 +57,12 @@ macro_rules! assert_eq_dbg {
        assert_eq_dbg!(@ $a, $b, " ({})", format_args!($($msg)+))
     };
     (@ $a:expr, $b:expr, $($msg:tt)+) => {
-        #[cfg(any(test, all(thingbuf_trace, feature = "std")))]
-        test_println!("ASSERT: {} == {}{}", stringify!($a), stringify!($b), format_args!($($msg)*));
-        assert_eq!($a, $b, $($msg)*);
-        test_println!("-> ok");
+        {
+            #[cfg(any(test, all(thingbuf_trace, feature = "std")))]
+            test_println!("ASSERT: {} == {}{}", stringify!($a), stringify!($b), format_args!($($msg)*));
+            assert_eq!($a, $b, $($msg)*);
+            test_println!("-> ok");
+        }
     }
 }
 
