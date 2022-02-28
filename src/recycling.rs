@@ -152,6 +152,12 @@ pub struct DefaultRecycle(());
 /// ever exceed that capacity. If the elements never grow beyond the specified
 /// capacity, this should mean that no additional allocations will ever occur
 /// once the initial pool of elements are allocated.
+///
+/// [recycle]: Recycle::recycle
+/// [`max_capacity`]: Self::max_capacity
+/// [`min_capacity`]: Self::min_capacity
+/// [`with_max_capacity`]: Self::with_max_capacity
+/// [`with_min_capacity`]: Self::with_min_capacity
 #[derive(Clone, Debug)]
 pub struct WithCapacity {
     min: usize,
