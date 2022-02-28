@@ -1,3 +1,5 @@
+//! Configurable policies for element reuse.
+
 pub trait Recycle<T> {
     /// Returns a new instance of type `T`.
     fn new_element(&self) -> T;
@@ -137,7 +139,28 @@ pub struct DefaultRecycle(());
 ///
 /// # Allocation Reuse
 ///
-/// When an upper bound is not set, this
+/// When an upper bound is not set, this recycling policy will _always_ reuse
+/// any allocated capacity when recycling an element. Over time, the number of
+/// reallocations required to grow items in a pool should decrease, amortizing
+/// reallocations over the lifetime of the program.
+///
+/// Of course, this means that it is technically possible for the allocated
+/// capacity of the pool to grow infinitely, which can cause a memory leak if
+/// used incorrectly. Therefore, it is also possible to set an upper bound on
+/// idle capacity, using [`with_max_capacity`]. When such a bound is set,
+/// recycled elements will be shrunk down to that capacity if they have grown
+/// past the upper bound while in use. If this is the case, reallocations may
+/// occur more often, but if the upper bound is higher than the typical required
+/// capacity, they should remain infrequent.
+///
+/// If elements will not require allocations of differing sizes, and the size is
+/// known in advance (e.g. a pool of `HashMap`s that always have exactly 64
+/// elements), the [`with_max_capacity`] and [`with_min_capacity`] methods can
+/// be called with the same value. This way, elements will always be initially
+/// allocated with *exactly* that much capacity, and will only be shrunk if they
+/// ever exceed that capacity. If the elements never grow beyond the specified
+/// capacity, this should mean that no additional allocations will ever occur
+/// once the initial pool of elements are allocated.
 #[derive(Clone, Debug)]
 pub struct WithCapacity {
     min: usize,
@@ -192,21 +215,141 @@ impl WithCapacity {
         }
     }
 
+    /// Sets an upper bound on the capacity that will be reused when [recycling]
+    /// elements.
+    ///
+    /// When an element is recycled, if its capacity exceeds the max value, it
+    /// will be shrunk down to that capacity. This will result in a
+    /// reallocation, but limits the total capacity allocated by the pool,
+    /// preventing unbounded memory use.
+    ///
+    /// Elements may still exceed the configured max capacity *while they are in
+    /// use*; this value only configures what happens when they are returned to
+    /// the pool.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::recycling::{Recycle, WithCapacity};
+    ///
+    /// // Create a recycler with max capacity of 8.
+    /// let recycle = WithCapacity::new().with_max_capacity(8);
+    ///
+    /// // Create a new string using that recycler.
+    /// let mut s: String = recycle.new_element();
+    /// assert_eq!(s.capacity(), 0);
+    ///
+    /// // Now, write some data to the string.
+    /// s.push_str("hello, world");
+    ///
+    /// // The string's capacity must be at least the length of the
+    /// // string 'hello, world'.
+    /// assert!(s.capacity() >= "hello, world".len());
+    ///
+    /// // After recycling the string, its capacity will be shrunk down
+    /// // to the configured max capacity.
+    /// recycle.recycle(&mut s);
+    /// assert_eq!(s.capacity(), 8);
+    /// ```
+    ///
+    /// [recycling]: Recycle::recycle
     pub const fn with_max_capacity(self, max: usize) -> Self {
         Self { max, ..self }
     }
 
+    /// Sets the minimum capacity when [allocating new elements][new].
+    ///
+    /// When new elements are created, they will be allocated with at least
+    /// `min` capacity.
+    ///
+    /// Note that this is a *lower bound*. Elements may be allocated with
+    /// greater than the minimum capacity, depending on the behavior of the
+    /// element being allocated, but there will always be *at least* `min`
+    /// capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::recycling::{Recycle, WithCapacity};
+    ///
+    /// // A recycler without a minimum capacity.
+    /// let no_min = WithCapacity::new();
+    ///
+    /// // A new element created by this recycler will not
+    /// // allocate any capacity until it is used.
+    /// let s: String = no_min.new_element();
+    /// assert_eq!(s.capacity(), 0);
+    ///
+    /// // Now, configure a minimum capacity.
+    /// let with_min = WithCapacity::new().with_min_capacity(8);
+    ///
+    /// // New elements created by this recycler will always be allocated
+    /// // with at least the specified capacity.
+    /// let s: String = with_min.new_element();
+    /// assert!(s.capacity() >= 8);
+    /// ```
+    ///
+    /// [new]: Recycle::new_element
     pub const fn with_min_capacity(self, min: usize) -> Self {
         Self { min, ..self }
     }
 
-    /// Returns the minimum allocated capacity.
+    /// Returns the minimum initial capacity when [allocating new
+    /// elements][new].
     ///
-    /// [New elements] will be allocated with this capacity.
+    /// This method can be used to implement `Recycle<T> for WithCapacity` where
+    /// `T` is a type defined outside of this crate. See [the `WithCapacity`
+    /// documentation][impling] for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::recycling::{Recycle, WithCapacity};
+    ///
+    /// let recycle = WithCapacity::new();
+    /// assert_eq!(recycle.min_capacity(), 0);
+    /// ```
+    ///
+    /// ```
+    /// use thingbuf::recycling::{Recycle, WithCapacity};
+    ///
+    /// let recycle = WithCapacity::new().with_min_capacity(64);
+    /// assert_eq!(recycle.min_capacity(), 64);
+    /// ```
+    ///
+    /// [new]: Recycle::new_element
+    /// [impling]: WithCapacity#implementations-for-other-types
     pub fn min_capacity(&self) -> usize {
         self.min
     }
 
+    /// Returns the maximum retained capacity when [recycling
+    /// elements][recycle].
+    ///
+    /// If no upper bound is configured, this will return [`usize::MAX`].
+    ///
+    /// This method can be used to implement `Recycle<T> for WithCapacity` where
+    /// `T` is a type defined outside of this crate. See [the `WithCapacity`
+    /// documentation][impling] for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::recycling::{Recycle, WithCapacity};
+    ///
+    /// let recycle = WithCapacity::new();
+    /// assert_eq!(recycle.max_capacity(), usize::MAX);
+    /// ```
+    ///
+    /// ```
+    /// use thingbuf::recycling::{Recycle, WithCapacity};
+    ///
+    /// let recycle = WithCapacity::new().with_max_capacity(64);
+    /// assert_eq!(recycle.max_capacity(), 64);
+    /// ```
+    ///
+    /// [recycle]: Recycle::recycle
+    /// [impling]: WithCapacity#implementations-for-other-types
     pub fn max_capacity(&self) -> usize {
         self.max
     }
