@@ -49,12 +49,6 @@ pub struct DefaultRecycle(());
 /// in place, returning all allocated capacity. [New elements] are allocated
 /// with capacity for 0 values; they will allocate when first used.
 ///
-/// ```rust
-/// use thingbuf::recycling::WithCapacity;
-///
-/// WithCapacity::new()
-/// ```
-///
 /// # Implementations for Other Types
 ///
 /// [`Recycle`] implementations may be added for similar data structures
