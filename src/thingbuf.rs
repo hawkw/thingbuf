@@ -343,7 +343,7 @@ where
     /// ```rust
     /// use thingbuf::ThingBuf;
     ///
-    /// #[derive(Default)]
+    /// #[derive(Clone, Default)]
     /// struct Message {
     ///     // ...
     /// }

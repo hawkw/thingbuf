@@ -50,13 +50,10 @@ pub struct DefaultRecycle(());
 /// with capacity for 0 values; they will allocate when first used.
 ///
 /// ```rust
-/// use thingbuf::recycle::WithCapacity;
+/// use thingbuf::recycling::WithCapacity;
 ///
 /// WithCapacity::new()
 /// ```
-///
-///
-///
 ///
 /// # Implementations for Other Types
 ///
@@ -70,7 +67,7 @@ pub struct DefaultRecycle(());
 /// for `WithCapacity` like so:
 ///
 /// ```
-/// use thingbuf::recycle::{self, Recycle};
+/// use thingbuf::recycling::{self, Recycle};
 /// # use std::marker::PhantomData;
 ///
 /// /// Some kind of exciting new heap-allocated collection.

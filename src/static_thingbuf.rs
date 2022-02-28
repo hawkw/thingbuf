@@ -357,7 +357,7 @@ where
     ///
     /// static MESSAGES: StaticThingBuf<Message, 16> = StaticThingBuf::new();
     ///
-    /// #[derive(Default)]
+    /// #[derive(Clone, Default)]
     /// struct Message {
     ///     // ...
     /// }
