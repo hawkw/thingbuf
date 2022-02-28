@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     thread,
 };
-use thingbuf::{StaticStringBuf, StaticThingBuf};
+use thingbuf::{recycling, StaticThingBuf};
 
 #[test]
 fn static_storage_thingbuf() {
@@ -50,13 +50,16 @@ fn static_storage_thingbuf() {
 
 #[test]
 fn static_storage_stringbuf() {
-    static BUF: StaticStringBuf<8> = StaticStringBuf::new();
+    use recycling::WithCapacity;
+
+    static BUF: StaticThingBuf<String, 8, WithCapacity> =
+        StaticThingBuf::with_recycle(WithCapacity::new().with_max_capacity(8));
     static PRODUCER_LIVE: AtomicBool = AtomicBool::new(true);
 
     let producer = thread::spawn(move || {
         for i in 0..16 {
             let mut string = 'write: loop {
-                match BUF.write() {
+                match BUF.push_ref() {
                     Ok(string) => break 'write string,
                     _ => thread::yield_now(),
                 }
