@@ -5,17 +5,19 @@ on:
     paths:
       - '**.rs'
       - '**/Cargo.toml'
+      - '.github/workflows/tests.yml'
   workflow_dispatch:
   pull_request:
     paths:
       - '**.rs'
       - '**/Cargo.toml'
+      - '.github/workflows/tests.yml'
 
 name: Tests
 jobs:
 
   tests:
-    name: Integration tests
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
