@@ -14,7 +14,6 @@ on:
 name: Loom Models
 
 env:
-  LOOM_MAX_PREEMPTIONS: 2
   LOOM_LOG: loom=debug
 
 jobs:
@@ -40,6 +39,10 @@ jobs:
       - name: Run model
         run: cargo test --profile loom --lib -- ${{ matrix.model }}
         env:
+          # it would be nice to run these with more preemptions, but
+          # that makes these models super slow...and LOOM_MAX_PREEMPTIONS=1 is
+          # good enough for Tokio's CI, so...
+          LOOM_MAX_PREEMPTIONS: 1
           RUSTFLAGS: "--cfg loom"
 
   # Run other loom models by scope
@@ -66,6 +69,7 @@ jobs:
       - name: Run models
         run: cargo test --profile loom --lib -- ${{ matrix.scope }}
         env:
+          LOOM_MAX_PREEMPTIONS: 2
           # `--cfg ci_skip_slow_models` will exclude the loom models that are
           # tested in `slow-models`.
           RUSTFLAGS: "--cfg loom --cfg ci_skip_slow_models"
