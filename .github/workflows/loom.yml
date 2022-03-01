@@ -53,22 +53,22 @@ jobs:
           - mpsc_async
           - thingbuf
           - util
-      name: loom models in ${{ matrix.scope }}
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v2
-        - name: Install stable toolchain
-          uses: actions-rs/toolchain@v1
-          with:
-            profile: minimal
-            toolchain: stable
-            override: true
-        - name: Run models
-          run: cargo test --profile loom --lib -- ${{ matrix.scope }}
-          env:
-            # `--cfg ci_skip_slow_models` will exclude the loom models that are
-            # tested in `slow-models`. 
-            RUSTFLAGS: "--cfg loom --cfg ci_skip_slow_models"
+    name: loom models in ${{ matrix.scope }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Run models
+        run: cargo test --profile loom --lib -- ${{ matrix.scope }}
+        env:
+          # `--cfg ci_skip_slow_models` will exclude the loom models that are
+          # tested in `slow-models`.
+          RUSTFLAGS: "--cfg loom --cfg ci_skip_slow_models"
 
   # Dummy job that requires all loom models to pass
   all_models:
