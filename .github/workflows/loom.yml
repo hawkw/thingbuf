@@ -26,7 +26,7 @@ jobs:
           - mpsc_try_send_recv
           - mpsc::rx_close_unconsumed
           - mpsc_sync::rx_close_unconsumed
-    name: loom model ${{ matrix.model }}
+    name: model '${{ matrix.model }}''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -56,7 +56,7 @@ jobs:
           - mpsc_async
           - thingbuf
           - util
-    name: loom models in ${{ matrix.scope }}
+    name: models in '${{ matrix.scope }}'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
