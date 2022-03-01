@@ -5,11 +5,13 @@ on:
     paths:
       - '**.rs'
       - '**/Cargo.toml'
+      - '.github/workflows/loom.yml'
   workflow_dispatch:
   pull_request:
     paths:
       - '**.rs'
       - '**/Cargo.toml'
+      - '.github/workflows/loom.yml'
 
 name: Loom Models
 

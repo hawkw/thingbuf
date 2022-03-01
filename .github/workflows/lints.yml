@@ -4,10 +4,12 @@ on:
       - main
     paths:
       - '**.rs'
+      - '.github/workflows/lints.yml'
   workflow_dispatch:
   pull_request:
     paths:
       - '**.rs'
+      - '.github/workflows/lints.yml'
 
 name: Lints
 jobs:

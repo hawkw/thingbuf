@@ -4,10 +4,12 @@ on:
       - main
     paths:
       - '**.rs'
+      - '.github/workflows/miri.yml'
   workflow_dispatch:
   pull_request:
     paths:
       - '**.rs'
+      - '.github/workflows/miri.yml'
 
 name: Miri
 jobs:
