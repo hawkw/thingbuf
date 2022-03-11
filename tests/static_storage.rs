@@ -1,3 +1,4 @@
+#![cfg(feature = "static")]
 use std::{
     fmt::Write,
     sync::atomic::{AtomicBool, Ordering},

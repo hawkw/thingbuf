@@ -15,6 +15,7 @@ edition = "2021"
 std = ["alloc", "parking_lot"]
 alloc = []
 default = ["std"]
+static = []
 
 [dependencies]
 pin-project = "1"

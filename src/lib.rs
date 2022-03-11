@@ -19,7 +19,7 @@ pub mod mpsc_perf_comparison {
 }
 
 feature! {
-    #![not(all(loom, test))]
+    #![all(feature = "static", not(all(loom, test)))]
     mod static_thingbuf;
     pub use self::static_thingbuf::StaticThingBuf;
 }
