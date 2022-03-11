@@ -471,19 +471,21 @@ impl<T> Slot<T> {
         (0..capacity).map(|i| Slot::new(i)).collect()
     }
 
-    #[cfg(not(all(loom, test)))]
-    const EMPTY: Self = Self::new(usize::MAX);
+    feature! {
+        #![all(feature = "static", not(all(loom, test)))]
 
-    #[cfg(not(all(loom, test)))]
-    pub(crate) const fn make_static_array<const CAPACITY: usize>() -> [Self; CAPACITY] {
-        let mut array = [Self::EMPTY; CAPACITY];
-        let mut i = 0;
-        while i < CAPACITY {
-            array[i] = Self::new(i);
-            i += 1;
+        const EMPTY: Self = Self::new(usize::MAX);
+
+        pub(crate) const fn make_static_array<const CAPACITY: usize>() -> [Self; CAPACITY] {
+            let mut array = [Self::EMPTY; CAPACITY];
+            let mut i = 0;
+            while i < CAPACITY {
+                array[i] = Self::new(i);
+                i += 1;
+            }
+
+            array
         }
-
-        array
     }
 
     #[cfg(not(all(loom, test)))]

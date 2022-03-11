@@ -6,7 +6,7 @@
 use super::*;
 use crate::{
     loom::{
-        atomic::{self, AtomicBool, Ordering},
+        atomic::{self, Ordering},
         sync::Arc,
         thread::{self, Thread},
     },
@@ -62,6 +62,8 @@ struct Inner<T, R> {
 #[cfg(not(all(loom, test)))]
 feature! {
     #![feature = "static"]
+
+    use crate::loom::atomic::AtomicBool;
 
     /// A statically-allocated, blocking bounded MPSC channel.
     ///
