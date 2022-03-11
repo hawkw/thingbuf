@@ -120,12 +120,6 @@ feature! {
         recycle: &'static R,
     }
 
-    struct Inner<T, R> {
-        core: super::ChannelCore<Thread>,
-        slots: Box<[Slot<T>]>,
-        recycle: R,
-    }
-
     // === impl StaticChannel ===
 
     impl<T, const CAPACITY: usize> StaticChannel<T, CAPACITY> {
