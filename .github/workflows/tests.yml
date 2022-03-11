@@ -13,22 +13,40 @@ on:
       - '**/Cargo.toml'
       - '.github/workflows/tests.yml'
 
+env:
+  RUSTFLAGS: -Dwarnings
+  RUST_BACKTRACE: 1
+  msrv: 1.57.0
+
 name: Tests
 jobs:
 
   tests:
     name: Tests
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - nightly
+          - 1.57.0
     steps:
       - uses: actions/checkout@v2
-      - name: Install stable toolchain
+      - name: Install toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: ${{ matrix.rust }}
           override: true
           components: rustfmt
-      - name: Run cargo test
+      - name: Run cargo test (with static APIs)
+        if: ${{ matrix.rust != env.msrv }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --features static
+      - name: Run cargo test (no static APIs)
+        if: ${{ matrix.rust == env.msrv }}
         uses: actions-rs/cargo@v1
         with:
           command: test

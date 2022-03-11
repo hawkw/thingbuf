@@ -109,7 +109,8 @@ thingbuf = { version = "0.1", default-features = false }
 With the `std` feature disabled, `thingbuf` will depend only on `libcore`. This
 means that APIs that require dynamic memory allocation will not be enabled.
 Statically allocated [channels][static-mpsc] and [queues][static-queue] are
-available for code without a memory allocator.
+available for code without a memory allocator, if the `static` feature flag is
+enabled.
 
 However, if a memory allocator _is_ available, `#![no_std]` code can also enable
 the `alloc` feature flag to depend on `liballoc`:
@@ -118,6 +119,28 @@ the `alloc` feature flag to depend on `liballoc`:
 [dependencies]
 thingbuf = { version = "0.1", default-features = false, features = ["alloc"] }
 ```
+
+### Crate Feature Flags
+
+- **std**: Enables features that require the Rust standard library, such as
+  synchronous (blocking) channels. This implicitly enables the "alloc" feature
+  flag. _Enabled by default_.
+- **alloc**: Enables features that require `liballoc` (but not `libstd`). This
+  enables `thingbuf` queues and asynchronous channels where the size of the
+  channel is determined at runtime.
+- **static**: Enables the static (const-generic-based) `thingbuf` queues and
+  channels. These can be used without dynamic memory allocation when the size of
+  a queue or channel is known at compile-time. _Disabled by default (requires
+  Rust 1.60 or newer)_.
+
+### Compiler Support
+
+`thingbuf` is built against the latest stable release. The minimum supported
+version is Rust 1.57. The current `thingbuf` version is not guaranteed to build on Rust
+versions earlier than the minimum supported version.
+
+Some feature flags may require newer Rust releases. For example, the "static"
+feature flag requries Rust 1.60+.
 
 ## FAQs
 

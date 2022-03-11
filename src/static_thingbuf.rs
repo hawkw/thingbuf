@@ -191,6 +191,7 @@ use core::fmt;
 /// [`ThingBuf`]: crate::ThingBuf
 /// [vyukov]: https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
 /// [object pool]: https://en.wikipedia.org/wiki/Object_pool_pattern
+#[cfg_attr(docsrs, doc(cfg(feature = "static")))]
 pub struct StaticThingBuf<T, const CAP: usize, R = recycling::DefaultRecycle> {
     core: Core,
     recycle: R,
