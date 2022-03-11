@@ -5,22 +5,30 @@ on:
     paths:
       - '**.rs'
       - '**/Cargo.toml'
+      - '.github/workflows/loom.yml'
   workflow_dispatch:
   pull_request:
     paths:
       - '**.rs'
       - '**/Cargo.toml'
+      - '.github/workflows/loom.yml'
 
 name: Loom Models
 
 env:
-  LOOM_MAX_PREEMPTIONS: 2
-  LOOM_LOG: loom=trace
-  RUSTFLAGS: "--cfg loom"
+  LOOM_LOG: loom=debug
 
 jobs:
-  loom_mpsc_send_recv_wrap:
-    name: "mpsc_send_recv_wrap"
+  # Run particularly slow loom models individually
+  slow_models:
+    strategy:
+      matrix:
+        model:
+          - mpsc_send_recv_wrap
+          - mpsc_try_send_recv
+          - mpsc::rx_close_unconsumed
+          - mpsc_sync::rx_close_unconsumed
+    name: model '${{ matrix.model }}''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -30,15 +38,27 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-          components: rustfmt
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --profile loom --lib -- mpsc_send_recv_wrap
+      - name: Run model
+        run: cargo test --profile loom --lib -- ${{ matrix.model }}
+        env:
+          # it would be nice to run these with more preemptions, but
+          # that makes these models super slow...and LOOM_MAX_PREEMPTIONS=1 is
+          # good enough for Tokio's CI, so...
+          LOOM_MAX_PREEMPTIONS: 1
+          RUSTFLAGS: "--cfg loom"
 
-  loom_mpsc_try_send_recv:
-    name: "mpsc_try_send_recv"
+  # Run other loom models by scope
+  models:
+    strategy:
+      matrix:
+        scope:
+          # NOTE: if adding loom models in a new module, that module needs to be
+          # added to this list!
+          - mpsc_sync
+          - mpsc_async
+          - thingbuf
+          - util
+    name: models in '${{ matrix.scope }}'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -48,118 +68,20 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-          components: rustfmt
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --profile loom --lib -- mpsc_try_send_recv
-
-  async_rx_close_unconsumed:
-    name: "mpsc::rx_close_unconsumed"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --profile loom --lib -- mpsc::rx_close_unconsumed
-
-  sync_rx_close_unconsumed:
-    name: "sync::rx_close_unconsumed"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --profile loom --lib -- mpsc_sync::rx_close_unconsumed
-
-  loom_mpsc_async:
-    name: "mpsc"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --profile loom --lib -- mpsc_async
+      - name: Run models
+        run: cargo test --profile loom --lib -- ${{ matrix.scope }}
+        env:
+          LOOM_MAX_PREEMPTIONS: 2
+          # `--cfg ci_skip_slow_models` will exclude the loom models that are
+          # tested in `slow-models`.
           RUSTFLAGS: "--cfg loom --cfg ci_skip_slow_models"
 
-  loom_mpsc_sync:
-    name: "mpsc::sync"
+  # Dummy job that requires all loom models to pass
+  all_models:
+    name: all loom models
     runs-on: ubuntu-latest
+    needs:
+      - slow_models
+      - models
     steps:
-      - uses: actions/checkout@v2
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --profile loom --lib -- mpsc_sync
-
-  loom_thingbuf:
-    name: "ThingBuf"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --profile loom --lib -- thingbuf
-
-  loom_util:
-    name: "util"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --profile loom --lib -- util
+      - run: exit 0
