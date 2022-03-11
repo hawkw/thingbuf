@@ -27,7 +27,7 @@ jobs:
         rust:
           - stable
           - nightly
-          - ${{ env.msrv }}
+          - 1.57.0
     steps:
       - uses: actions/checkout@v2
       - name: Install toolchain
