@@ -97,7 +97,7 @@ feature! {
     /// # Examples
     ///
     /// ```
-    /// use thingbuf::mpsc::sync::StaticChannel;
+    /// use thingbuf::mpsc::blocking::StaticChannel;
     ///
     /// // Construct a statically-allocated channel of `usize`s with a capacity
     /// // of 16 messages.
@@ -260,7 +260,7 @@ feature! {
         /// Sending formatted strings by writing them directly to channel slots,
         /// in place:
         /// ```
-        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use thingbuf::mpsc::blocking::StaticChannel;
         /// use std::{fmt::Write, thread};
         ///
         /// static CHANNEL: StaticChannel<String, 8> = StaticChannel::new();
@@ -313,7 +313,7 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use thingbuf::mpsc::blocking::StaticChannel;
         /// use std::{fmt::Write, thread};
         ///
         /// static CHANNEL: StaticChannel<i32, 8> = StaticChannel::new();
@@ -468,7 +468,7 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use thingbuf::mpsc::blocking::StaticChannel;
         /// use std::{thread, fmt::Write};
         ///
         /// static CHANNEL: StaticChannel<String, 100> = StaticChannel::new();
@@ -487,7 +487,7 @@ feature! {
         /// Values are buffered:
         ///
         /// ```
-        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use thingbuf::mpsc::blocking::StaticChannel;
         /// use std::fmt::Write;
         ///
         /// static CHANNEL: StaticChannel<String, 100> = StaticChannel::new();
@@ -527,7 +527,7 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use thingbuf::mpsc::blocking::StaticChannel;
         /// use std::thread;
         ///
         /// static CHANNEL: StaticChannel<i32, 100> = StaticChannel::new();
@@ -544,7 +544,7 @@ feature! {
         /// Values are buffered:
         ///
         /// ```
-        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use thingbuf::mpsc::blocking::StaticChannel;
         ///
         /// static CHANNEL: StaticChannel<i32, 100> = StaticChannel::new();
         /// let (tx, rx) = CHANNEL.split();
@@ -663,7 +663,7 @@ where
     /// Sending formatted strings by writing them directly to channel slots,
     /// in place:
     /// ```
-    /// use thingbuf::mpsc::sync;
+    /// use thingbuf::mpsc::blocking;
     /// use std::{fmt::Write, thread};
     ///
     /// let (tx, rx) = sync::channel::<String>(8);
@@ -718,7 +718,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use thingbuf::mpsc::sync;
+    /// use thingbuf::mpsc::blocking;
     /// use std::thread;
     ///
     /// let (tx, rx) = sync::channel(8);
@@ -863,7 +863,7 @@ impl<T, R> Receiver<T, R> {
     /// # Examples
     ///
     /// ```
-    /// use thingbuf::mpsc::sync;
+    /// use thingbuf::mpsc::blocking;
     /// use std::{thread, fmt::Write};
     ///
     /// let (tx, rx) = sync::channel::<String>(100);
@@ -881,7 +881,7 @@ impl<T, R> Receiver<T, R> {
     /// Values are buffered:
     ///
     /// ```
-    /// use thingbuf::mpsc::sync;
+    /// use thingbuf::mpsc::blocking;
     /// use std::fmt::Write;
     ///
     /// let (tx, rx) = sync::channel::<String>(100);
@@ -920,7 +920,7 @@ impl<T, R> Receiver<T, R> {
     /// # Examples
     ///
     /// ```
-    /// use thingbuf::mpsc::sync;
+    /// use thingbuf::mpsc::blocking;
     /// use std::{thread, fmt::Write};
     ///
     /// let (tx, rx) = sync::channel(100);
@@ -936,7 +936,7 @@ impl<T, R> Receiver<T, R> {
     /// Values are buffered:
     ///
     /// ```
-    /// use thingbuf::mpsc::sync;
+    /// use thingbuf::mpsc::blocking;
     ///
     /// let (tx, rx) = sync::channel(100);
     ///

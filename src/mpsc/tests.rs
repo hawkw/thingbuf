@@ -2,4 +2,4 @@ use super::*;
 
 mod mpsc_async;
 #[cfg(feature = "std")]
-mod mpsc_sync;
+mod mpsc_blocking;

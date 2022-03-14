@@ -20,8 +20,8 @@ aaaaaaaaaaaaaa";
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             b.iter(|| {
-                use thingbuf::mpsc::{sync, TrySendError};
-                let (tx, rx) = sync::channel::<String>(100);
+                use thingbuf::mpsc::{blocking, TrySendError};
+                let (tx, rx) = blocking::channel::<String>(100);
                 let producer = thread::spawn(move || loop {
                     match tx.try_send_ref() {
                         Ok(mut slot) => {
@@ -103,8 +103,8 @@ aaaaaaaaaaaaaa";
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             b.iter(|| {
-                use thingbuf::mpsc::sync;
-                let (tx, rx) = sync::channel::<String>(100);
+                use thingbuf::mpsc::blocking;
+                let (tx, rx) = blocking::channel::<String>(100);
                 let producer = thread::spawn(move || {
                     while let Ok(mut slot) = tx.send_ref() {
                         slot.clear();

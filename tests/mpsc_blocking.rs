@@ -1,5 +1,5 @@
 use std::thread;
-use thingbuf::mpsc::sync;
+use thingbuf::mpsc::blocking;
 
 #[test]
 fn basically_works() {
@@ -8,7 +8,7 @@ fn basically_works() {
     const N_SENDS: usize = 10;
     const N_PRODUCERS: usize = 10;
 
-    fn start_producer(tx: sync::Sender<usize>, n: usize) -> thread::JoinHandle<()> {
+    fn start_producer(tx: blocking::Sender<usize>, n: usize) -> thread::JoinHandle<()> {
         let tag = n * N_SENDS;
         thread::Builder::new()
             .name(format!("producer {}", n))
@@ -24,7 +24,7 @@ fn basically_works() {
             .expect("spawning threads should succeed")
     }
 
-    let (tx, rx) = sync::channel(N_SENDS / 2);
+    let (tx, rx) = blocking::channel(N_SENDS / 2);
     for n in 0..N_PRODUCERS {
         start_producer(tx.clone(), n);
     }
@@ -56,7 +56,7 @@ fn tx_close_drains_queue() {
     for i in 0..10000 {
         println!("\n\n--- iteration {} ---\n\n", i);
 
-        let (tx, rx) = sync::channel(LEN);
+        let (tx, rx) = blocking::channel(LEN);
         let producer = thread::spawn(move || {
             for i in 0..LEN {
                 tx.send(i).unwrap();
