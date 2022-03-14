@@ -18,13 +18,21 @@ use crate::{
 };
 use core::{fmt, ops::Index, task::Poll};
 
+/// Error returned by the [`Sender::try_send`] (and [`StaticSender::try_send`])
+/// methods.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum TrySendError<T = ()> {
+    /// The data could not be sent on the channel because the channel is
+    /// currently full and sending would require waiting for capacity.
     Full(T),
+    /// The data could not be sent because the [`Receiver`] half of the channel
+    /// has been dropped.
     Closed(T),
 }
 
+/// Error returned by [`Sender::send`] and [`Sender::send_ref`], if the
+/// [`Receiver`] half of the channel has been dropped.
 #[derive(Debug)]
 pub struct Closed<T = ()>(T);
 

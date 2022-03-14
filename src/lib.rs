@@ -42,6 +42,18 @@ use crate::{
 };
 
 /// A reference to an entry in a [`ThingBuf`].
+///
+/// A `Ref` represents the exclusive permission to mutate a given element in a
+/// queue. A `Ref<T>` [implements `DerefMut<T>`] to allow writing to that
+/// element.
+///
+/// `Ref`s are returned by the [`ThingBuf::push_ref`] and [`ThingBuf::pop_ref`]
+/// methods. When the `Ref` is dropped, the exclusive write access to that
+/// element is released, and the push or pop operation is completed &mdash;
+/// calling `push_ref` or `pop_ref` *begins* a push or pop operation, which ends
+/// when the returned `Ref` is complete. When the `Ref` is dropped, the pushed
+/// element will become available to a subsequent `pop_ref`, or the popped
+/// element will be able to be written to by a `push_ref`, respectively.
 pub struct Ref<'slot, T> {
     ptr: MutPtr<MaybeUninit<T>>,
     slot: &'slot Slot<T>,
