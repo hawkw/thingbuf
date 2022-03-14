@@ -282,18 +282,6 @@ macro_rules! impl_send_ref {
     (pub struct $name:ident<$notify:ty>;) => {
         pub struct $name<'sender, T>(SendRefInner<'sender, T, $notify>);
 
-        impl<T> $name<'_, T> {
-            #[inline]
-            pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
-                self.0.with(f)
-            }
-
-            #[inline]
-            pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
-                self.0.with_mut(f)
-            }
-        }
-
         impl<T> core::ops::Deref for $name<'_, T> {
             type Target = T;
 
@@ -361,18 +349,6 @@ macro_rules! impl_recv_ref {
             // bad option here. Just don't reorder these fields. :)
             slot: Ref<'recv, T>,
             _notify: crate::mpsc::NotifyTx<'recv, $notify>,
-        }
-
-        impl<T> $name<'_, T> {
-            #[inline]
-            pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
-                self.slot.with(f)
-            }
-
-            #[inline]
-            pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
-                self.slot.with_mut(f)
-            }
         }
 
         impl<T> core::ops::Deref for $name<'_, T> {

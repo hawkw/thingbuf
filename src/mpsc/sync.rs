@@ -237,7 +237,7 @@ feature! {
             match self.send_ref() {
                 Err(Closed(())) => Err(Closed(val)),
                 Ok(mut slot) => {
-                    slot.with_mut(|slot| *slot = val);
+                    *slot = val;
                     Ok(())
                 }
             }
@@ -363,7 +363,7 @@ where
         match self.send_ref() {
             Err(Closed(())) => Err(Closed(val)),
             Ok(mut slot) => {
-                slot.with_mut(|slot| *slot = val);
+                *slot = val;
                 Ok(())
             }
         }

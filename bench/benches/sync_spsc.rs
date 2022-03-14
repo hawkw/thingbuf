@@ -33,10 +33,8 @@ aaaaaaaaaaaaaa";
                     }
                 });
                 for _ in 0..i {
-                    let r = rx.recv_ref().unwrap();
-                    r.with(|val| {
-                        criterion::black_box(val);
-                    });
+                    let val = rx.recv_ref().unwrap();
+                    criterion::black_box(val);
                 }
                 drop(rx);
                 producer.join().unwrap();
@@ -114,10 +112,8 @@ aaaaaaaaaaaaaa";
                     }
                 });
                 for _ in 0..i {
-                    let r = rx.recv_ref().unwrap();
-                    r.with(|val| {
-                        criterion::black_box(val);
-                    });
+                    let val = rx.recv_ref().unwrap();
+                    criterion::black_box(val);
                 }
                 drop(rx);
                 producer.join().unwrap();

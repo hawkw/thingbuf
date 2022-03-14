@@ -387,7 +387,7 @@ impl Drop for Core {
 
 impl<T> Ref<'_, T> {
     #[inline]
-    pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
+    fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
         self.ptr.with(|value| unsafe {
             // Safety: if a `Ref` exists, we have exclusive ownership of the
             // slot. A `Ref` is only created if the slot has already been
@@ -399,7 +399,7 @@ impl<T> Ref<'_, T> {
     }
 
     #[inline]
-    pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
+    fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
         self.ptr.with(|value| unsafe {
             // Safety: if a `Ref` exists, we have exclusive ownership of the
             // slot.
