@@ -54,6 +54,8 @@ use crate::{
 /// when the returned `Ref` is complete. When the `Ref` is dropped, the pushed
 /// element will become available to a subsequent `pop_ref`, or the popped
 /// element will be able to be written to by a `push_ref`, respectively.
+///
+/// [implements `DerefMut<T>`]: #impl-DerefMut
 pub struct Ref<'slot, T> {
     ptr: MutPtr<MaybeUninit<T>>,
     slot: &'slot Slot<T>,
