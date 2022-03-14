@@ -19,7 +19,7 @@ fn static_storage_thingbuf() {
                     _ => thread::yield_now(),
                 }
             };
-            thing.with_mut(|thing| *thing = i);
+            *thing = i;
         }
         PRODUCER_LIVE.store(false, Ordering::Release);
     });
@@ -30,10 +30,10 @@ fn static_storage_thingbuf() {
     // results string.
     while PRODUCER_LIVE.load(Ordering::Acquire) {
         match BUF.pop_ref() {
-            Some(thing) => thing.with(|thing| {
+            Some(thing) => {
                 assert_eq!(*thing, i);
                 i += 1;
-            }),
+            }
             None => thread::yield_now(),
         }
     }
@@ -42,10 +42,8 @@ fn static_storage_thingbuf() {
 
     // drain the queue.
     while let Some(thing) = BUF.pop_ref() {
-        thing.with(|thing| {
-            assert_eq!(*thing, i);
-            i += 1;
-        })
+        assert_eq!(*thing, i);
+        i += 1;
     }
 }
 

@@ -1,6 +1,7 @@
-#![cfg_attr(docsrs, doc = include_str!("../README.md"))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
 use core::{cmp, fmt, mem::MaybeUninit, ops, ptr};
 #[macro_use]
 mod macros;
@@ -13,7 +14,7 @@ mod wait;
 
 pub use self::recycling::Recycle;
 
-#[cfg_attr(docsrs, doc = include_str!("../mpsc_perf_comparison.md"))]
+#[doc = include_str!("../mpsc_perf_comparison.md")]
 pub mod mpsc_perf_comparison {
     // Empty module, used only for documentation.
 }
@@ -41,6 +42,20 @@ use crate::{
 };
 
 /// A reference to an entry in a [`ThingBuf`].
+///
+/// A `Ref` represents the exclusive permission to mutate a given element in a
+/// queue. A `Ref<T>` [implements `DerefMut<T>`] to allow writing to that
+/// element.
+///
+/// `Ref`s are returned by the [`ThingBuf::push_ref`] and [`ThingBuf::pop_ref`]
+/// methods. When the `Ref` is dropped, the exclusive write access to that
+/// element is released, and the push or pop operation is completed &mdash;
+/// calling `push_ref` or `pop_ref` *begins* a push or pop operation, which ends
+/// when the returned `Ref` is complete. When the `Ref` is dropped, the pushed
+/// element will become available to a subsequent `pop_ref`, or the popped
+/// element will be able to be written to by a `push_ref`, respectively.
+///
+/// [implements `DerefMut<T>`]: #impl-DerefMut
 pub struct Ref<'slot, T> {
     ptr: MutPtr<MaybeUninit<T>>,
     slot: &'slot Slot<T>,
@@ -374,7 +389,7 @@ impl Drop for Core {
 
 impl<T> Ref<'_, T> {
     #[inline]
-    pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
+    fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
         self.ptr.with(|value| unsafe {
             // Safety: if a `Ref` exists, we have exclusive ownership of the
             // slot. A `Ref` is only created if the slot has already been
@@ -386,7 +401,7 @@ impl<T> Ref<'_, T> {
     }
 
     #[inline]
-    pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
+    fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
         self.ptr.with(|value| unsafe {
             // Safety: if a `Ref` exists, we have exclusive ownership of the
             // slot.

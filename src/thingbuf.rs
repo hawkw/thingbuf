@@ -296,6 +296,10 @@ impl<T, R> ThingBuf<T, R>
 where
     R: Recycle<T>,
 {
+    /// Returns a new `ThingBuf` with space for `capacity` elements and
+    /// the provided [recycling policy].
+    ///
+    /// [recycling policy]: crate::recycling::Recycle
     pub fn with_recycle(capacity: usize, recycle: R) -> Self {
         assert!(capacity > 0);
         Self {

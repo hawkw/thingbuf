@@ -1,12 +1,38 @@
 //! Configurable policies for element reuse.
 
+/// A policy defining how pooled elements of type `T` are reused.
+///
+/// A recycling policy provides two operations: [`Recycle::new_element`], which
+/// defines how new elements of type `T` are *initially* constructed, and
+/// [`Recycle::recycle`], which, given an `&mut T`, prepares that element for
+/// reuse.
+///
+/// This trait is intended to allow defining custom policies to reuse values
+/// that are expensive to create or destroy. If a type `T` owns a large memory
+/// allocation or other reuseable resource (such as a file descriptor, network
+/// connection, worker thread, et cetera), the [`recycle`](Self::recycle)
+/// operation can clear any *data* associated with a particular use of that
+/// value while retaining its memory allocation or other resources. For example,
+/// the [`WithCapacity`] recycling policy clears standard library collections
+/// such as `String` and `Vec` in place, retaining their allocated heap
+/// capacity, so that future uses of those collections do not need to
+/// reallocate.
 pub trait Recycle<T> {
     /// Returns a new instance of type `T`.
+    ///
+    /// This method will be called to populate the pool with the initial set of
+    /// elements. It may also be called if an element is permanently removed
+    /// from the pool and will not be returned.
     fn new_element(&self) -> T;
 
-    /// Resets `element` in place.
+    /// Prepares `element` element for reuse.
     ///
-    /// Typically, this retains any previous allocations.
+    /// Typically, this clears any data stored in `element` in place, but
+    /// retains any previous heap allocations owned by `element` so that they
+    /// can be used again.
+    ///
+    /// This method is called when a `T` value is returned to the pool that owns
+    /// it.
     fn recycle(&self, element: &mut T);
 }
 
@@ -175,6 +201,7 @@ where
 }
 
 impl DefaultRecycle {
+    /// Returns a new `DefaultRecycle`.
     pub const fn new() -> Self {
         Self(())
     }

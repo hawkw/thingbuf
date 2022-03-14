@@ -18,13 +18,21 @@ use crate::{
 };
 use core::{fmt, ops::Index, task::Poll};
 
+/// Error returned by the [`Sender::try_send`] (and [`StaticSender::try_send`])
+/// methods.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum TrySendError<T = ()> {
+    /// The data could not be sent on the channel because the channel is
+    /// currently full and sending would require waiting for capacity.
     Full(T),
+    /// The data could not be sent because the [`Receiver`] half of the channel
+    /// has been dropped.
     Closed(T),
 }
 
+/// Error returned by [`Sender::send`] and [`Sender::send_ref`], if the
+/// [`Receiver`] half of the channel has been dropped.
 #[derive(Debug)]
 pub struct Closed<T = ()>(T);
 
@@ -271,20 +279,9 @@ impl<N: Notify + Unpin> Drop for NotifyTx<'_, N> {
 }
 
 macro_rules! impl_send_ref {
-    (pub struct $name:ident<$notify:ty>;) => {
+    ($(#[$m:meta])* pub struct $name:ident<$notify:ty>;) => {
+        $(#[$m])*
         pub struct $name<'sender, T>(SendRefInner<'sender, T, $notify>);
-
-        impl<T> $name<'_, T> {
-            #[inline]
-            pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
-                self.0.with(f)
-            }
-
-            #[inline]
-            pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
-                self.0.with_mut(f)
-            }
-        }
 
         impl<T> core::ops::Deref for $name<'_, T> {
             type Target = T;
@@ -334,7 +331,8 @@ macro_rules! impl_send_ref {
 }
 
 macro_rules! impl_recv_ref {
-    (pub struct $name:ident<$notify:ty>;) => {
+    ($(#[$m:meta])* pub struct $name:ident<$notify:ty>;) => {
+        $(#[$m])*
         pub struct $name<'recv, T> {
             // /!\ LOAD BEARING STRUCT DROP ORDER /!\
             //
@@ -353,18 +351,6 @@ macro_rules! impl_recv_ref {
             // bad option here. Just don't reorder these fields. :)
             slot: Ref<'recv, T>,
             _notify: crate::mpsc::NotifyTx<'recv, $notify>,
-        }
-
-        impl<T> $name<'_, T> {
-            #[inline]
-            pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
-                self.slot.with(f)
-            }
-
-            #[inline]
-            pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
-                self.slot.with_mut(f)
-            }
         }
 
         impl<T> core::ops::Deref for $name<'_, T> {

@@ -110,7 +110,12 @@ With the `std` feature disabled, `thingbuf` will depend only on `libcore`. This
 means that APIs that require dynamic memory allocation will not be enabled.
 Statically allocated [channels][static-mpsc] and [queues][static-queue] are
 available for code without a memory allocator, if the `static` feature flag is
-enabled.
+enabled:
+
+```toml
+[dependencies]
+thingbuf = { version = "0.1", default-features = false, features = ["static"] }
+```
 
 However, if a memory allocator _is_ available, `#![no_std]` code can also enable
 the `alloc` feature flag to depend on `liballoc`:

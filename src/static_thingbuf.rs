@@ -202,13 +202,21 @@ pub struct StaticThingBuf<T, const CAP: usize, R = recycling::DefaultRecycle> {
 
 #[cfg(not(test))]
 impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
-    /// Returns a new `StaticThingBuf` with space for `capacity` elements.
+    /// Returns a new `StaticThingBuf` with space for `CAP` elements.
+    ///
+    /// This queue will use the [default recycling policy].
+    ///
+    /// [recycling policy]: crate::recycling::DefaultRecycle
     pub const fn new() -> Self {
         Self::with_recycle(recycling::DefaultRecycle::new())
     }
 }
 
 impl<T, const CAP: usize, R> StaticThingBuf<T, CAP, R> {
+    /// Returns a new `StaticThingBuf` with space for `CAP` elements and
+    /// the provided [recycling policy].
+    ///
+    /// [recycling policy]: crate::recycling::Recycle
     pub const fn with_recycle(recycle: R) -> Self {
         StaticThingBuf {
             core: Core::new(CAP),
