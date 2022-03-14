@@ -122,7 +122,7 @@ feature! {
         recycle: R,
     }
 
-    /// Synchronously sends values to an associated [`StaticReciever`].
+    /// Synchronously sends values to an associated [`StaticReceiver`].
     ///
     /// Instances of this struct are created by the [`StaticChannel::split`] and
     /// [``StaticChannel::try_split`] functions.
@@ -247,7 +247,7 @@ feature! {
         /// writable slot in the channel, and returns a [`SendRef`] that allows
         /// mutating the slot in place. If the [`StaticReeiver`] end of the
         /// channel  uses the [`StaticReceiver::recv_ref`] or
-        /// [`StaticReceiver::try_recv_ref`] methods for recieving from the
+        /// [`StaticReceiver::try_recv_ref`] methods for receiving from the
         /// channel, this allows allocations for channel messages to be reused
         /// in place.
         ///
@@ -655,7 +655,7 @@ where
     /// writable slot in the channel, and returns a [`SendRef`] that allows
     /// mutating the slot in place. If the [`Receiver`] end of the channel
     /// uses the [`Receiver::recv_ref`] or [`Receiver::poll_recv_ref`]
-    /// methods for recieving from the channel, this allows allocations for
+    /// methods for receiving from the channel, this allows allocations for
     /// channel messages to be reused in place.
     ///
     /// # Errors
