@@ -245,11 +245,10 @@ feature! {
         /// This is similar to the [`send`] method, but, rather than taking a
         /// message by value to write to the channel, this method reserves a
         /// writable slot in the channel, and returns a [`SendRef`] that allows
-        /// mutating the slot in place. If the [`StaticReeiver`] end of the
-        /// channel  uses the [`StaticReceiver::recv_ref`] or
-        /// [`StaticReceiver::try_recv_ref`] methods for receiving from the
-        /// channel, this allows allocations for channel messages to be reused
-        /// in place.
+        /// mutating the slot in place. If the [`StaticReceiver`] end of the
+        /// channel uses the [`StaticReceiver::recv_ref`] method for receiving
+        /// from the channel, this allows allocations for channel messages to be
+        /// reused in place.
         ///
         /// # Errors
         ///
@@ -318,6 +317,7 @@ feature! {
         /// use std::{fmt::Write, thread};
         ///
         /// static CHANNEL: StaticChannel<i32, 8> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
         ///
         /// // Spawn a thread that prints each message received from the channel:
         /// thread::spawn(move || {
@@ -481,8 +481,7 @@ feature! {
         /// });
         ///
         /// assert_eq!(Some("hello world!"), rx.recv_ref().as_deref().map(String::as_str));
-        /// assert_eq!(None, rx.recv().await.as_deref());
-        /// # }
+        /// assert_eq!(None, rx.recv().as_deref());
         /// ```
         ///
         /// Values are buffered:
@@ -499,7 +498,6 @@ feature! {
         ///
         /// assert_eq!("hello", rx.recv_ref().unwrap().as_str());
         /// assert_eq!("world", rx.recv_ref().unwrap().as_str());
-        /// # }
         /// ```
         ///
         /// [`send_ref`]: StaticSender::send_ref
@@ -554,8 +552,8 @@ feature! {
         /// tx.send(1).unwrap();
         /// tx.send(2).unwrap();
         ///
-        /// assert_eq!(Some(3), rx.recv());
-        /// assert_eq!(Some(4), rx.recv());
+        /// assert_eq!(Some(1), rx.recv());
+        /// assert_eq!(Some(2), rx.recv());
         /// ```
         ///
         /// [`send_ref`]: StaticSender::send_ref
@@ -629,12 +627,10 @@ impl_recv_ref! {
     /// A `RecvRef` represents the exclusive permission to mutate a given
     /// element in a channel. A `RecvRef<T>` [implements `DerefMut<T>`] to allow
     /// writing to that element. This is analogous to the [`Ref`] type, except
-    /// that it completes a `recv_ref` or `poll_recv_ref` operation when it is
-    /// dropped.
+    /// that it completes a `recv_ref` operation when it is dropped.
     ///
     /// This type is returned by the [`Receiver::recv_ref`] and
-    /// [`Receiver::poll_recv_ref`] (or [`StaticReceiver::recv_ref`] and
-    /// [`StaticReceiver::poll_recv_ref`]) methods.
+    /// [`StaticReceiver::recv_ref`] methods.
     ///
     /// [implements `DerefMut<T>`]: #impl-DerefMut
     /// [`Ref`]: crate::Ref
@@ -654,9 +650,8 @@ where
     /// message by value to write to the channel, this method reserves a
     /// writable slot in the channel, and returns a [`SendRef`] that allows
     /// mutating the slot in place. If the [`Receiver`] end of the channel
-    /// uses the [`Receiver::recv_ref`] or [`Receiver::poll_recv_ref`]
-    /// methods for receiving from the channel, this allows allocations for
-    /// channel messages to be reused in place.
+    /// uses the [`Receiver::recv_ref`] method for receiving from the channel,
+    /// this allows allocations for channel messages to be reused in place.
     ///
     /// # Errors
     ///
@@ -880,8 +875,7 @@ impl<T, R> Receiver<T, R> {
     /// });
     ///
     /// assert_eq!(Some("hello world!"), rx.recv_ref().as_deref().map(String::as_str));
-    /// assert_eq!(None, rx.recv().await.as_deref());
-    /// # }
+    /// assert_eq!(None, rx.recv().as_deref());
     /// ```
     ///
     /// Values are buffered:
@@ -897,7 +891,6 @@ impl<T, R> Receiver<T, R> {
     ///
     /// assert_eq!("hello", rx.recv_ref().unwrap().as_str());
     /// assert_eq!("world", rx.recv_ref().unwrap().as_str());
-    /// # }
     /// ```
     ///
     /// [`send_ref`]: Sender::send_ref
@@ -950,8 +943,8 @@ impl<T, R> Receiver<T, R> {
     /// tx.send(1).unwrap();
     /// tx.send(2).unwrap();
     ///
-    /// assert_eq!(Some(3), rx.recv());
-    /// assert_eq!(Some(4), rx.recv());
+    /// assert_eq!(Some(1), rx.recv());
+    /// assert_eq!(Some(2), rx.recv());
     /// ```
     ///
     /// [`send_ref`]: Sender::send_ref

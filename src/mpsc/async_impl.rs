@@ -401,8 +401,8 @@ feature! {
         /// tx.send(1).await.unwrap();
         /// tx.send(2).await.unwrap();
         ///
-        /// assert_eq!(Some(3), rx.recv().await);
-        /// assert_eq!(Some(4), rx.recv().await);
+        /// assert_eq!(Some(1), rx.recv().await);
+        /// assert_eq!(Some(2), rx.recv().await);
         /// # }
         /// ```
         ///
@@ -1033,8 +1033,8 @@ feature! {
         /// tx.send(1).await.unwrap();
         /// tx.send(2).await.unwrap();
         ///
-        /// assert_eq!(Some(3), rx.recv().await);
-        /// assert_eq!(Some(4), rx.recv().await);
+        /// assert_eq!(Some(1), rx.recv().await);
+        /// assert_eq!(Some(2), rx.recv().await);
         /// # }
         /// ```
         ///
