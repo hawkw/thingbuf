@@ -279,7 +279,8 @@ impl<N: Notify + Unpin> Drop for NotifyTx<'_, N> {
 }
 
 macro_rules! impl_send_ref {
-    (pub struct $name:ident<$notify:ty>;) => {
+    ($(#[$m:meta])* pub struct $name:ident<$notify:ty>;) => {
+        $(#[$m])*
         pub struct $name<'sender, T>(SendRefInner<'sender, T, $notify>);
 
         impl<T> core::ops::Deref for $name<'_, T> {
@@ -330,7 +331,8 @@ macro_rules! impl_send_ref {
 }
 
 macro_rules! impl_recv_ref {
-    (pub struct $name:ident<$notify:ty>;) => {
+    ($(#[$m:meta])* pub struct $name:ident<$notify:ty>;) => {
+        $(#[$m])*
         pub struct $name<'recv, T> {
             // /!\ LOAD BEARING STRUCT DROP ORDER /!\
             //
