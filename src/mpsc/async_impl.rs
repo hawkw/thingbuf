@@ -76,7 +76,6 @@ feature! {
     where
         R: Recycle<T>,
     {
-
         /// Reserves a slot in the channel to mutate in place, waiting until
         /// there is a free slot to write to.
         ///

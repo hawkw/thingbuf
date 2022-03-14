@@ -1,7 +1,7 @@
 //! A synchronous multi-producer, single-consumer channel.
 //!
 //! This provides an equivalent API to the [`mpsc`](crate::mpsc) module, but the
-//! [`Receiver`] type in this module waits by blocking the current thread,
+//! [`Receiver`] types in this module wait by blocking the current thread,
 //! rather than asynchronously yielding.
 use super::*;
 use crate::{
@@ -17,7 +17,12 @@ use crate::{
 };
 use core::{fmt, pin::Pin};
 
-/// Returns a new synchronous multi-producer, single consumer channel.
+/// Returns a new synchronous multi-producer, single consumer (MPSC)
+/// channel with  the provided capacity.
+///
+/// This channel will use the [default recycling policy].
+///
+/// [recycling policy]: crate::recycling::DefaultRecycle
 pub fn channel<T: Default + Clone>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     with_recycle(capacity, recycling::DefaultRecycle::new())
 }
@@ -42,12 +47,19 @@ pub fn with_recycle<T, R: Recycle<T>>(
     let rx = Receiver { inner };
     (tx, rx)
 }
-
+/// Synchronously receives values from associated [`Sender`]s.
+///
+/// Instances of this struct are created by the [`channel`] and
+/// [`with_recycle`] functions.
 #[derive(Debug)]
 pub struct Sender<T, R = recycling::DefaultRecycle> {
     inner: Arc<Inner<T, R>>,
 }
 
+/// Synchronously sends values to an associated [`Receiver`].
+///
+/// Instances of this struct are created by the [`channel`] and
+/// [`with_recycle`] functions.
 #[derive(Debug)]
 pub struct Receiver<T, R = recycling::DefaultRecycle> {
     inner: Arc<Inner<T, R>>,
@@ -85,7 +97,7 @@ feature! {
     /// # Examples
     ///
     /// ```
-    /// use thingbuf::mpsc::StaticChannel;
+    /// use thingbuf::mpsc::sync::StaticChannel;
     ///
     /// // Construct a statically-allocated channel of `usize`s with a capacity
     /// // of 16 messages.
@@ -110,12 +122,20 @@ feature! {
         recycle: R,
     }
 
+    /// Synchronously sends values to an associated [`StaticReciever`].
+    ///
+    /// Instances of this struct are created by the [`StaticChannel::split`] and
+    /// [``StaticChannel::try_split`] functions.
     pub struct StaticSender<T: 'static, R: 'static = recycling::DefaultRecycle> {
         core: &'static ChannelCore<Thread>,
         slots: &'static [Slot<T>],
         recycle: &'static R,
     }
 
+    /// Synchronously receives values from associated [`StaticSender`]s.
+    ///
+    /// Instances of this struct are created by the [`StaticChannel::split`] and
+    /// [``StaticChannel::try_split`] functions.
     pub struct StaticReceiver<T: 'static, R: 'static = recycling::DefaultRecycle> {
         core: &'static ChannelCore<Thread>,
         slots: &'static [Slot<T>],
@@ -219,20 +239,101 @@ feature! {
     where
         R: Recycle<T>,
     {
-        pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
-            self.core
-                .try_send_ref(self.slots, self.recycle)
-                .map(SendRef)
-        }
-
-        pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
-            self.core.try_send(self.slots, val, self.recycle)
-        }
-
+        /// Reserves a slot in the channel to mutate in place, blocking until
+        /// there is a free slot to write to.
+        ///
+        /// This is similar to the [`send`] method, but, rather than taking a
+        /// message by value to write to the channel, this method reserves a
+        /// writable slot in the channel, and returns a [`SendRef`] that allows
+        /// mutating the slot in place. If the [`StaticReeiver`] end of the
+        /// channel  uses the [`StaticReceiver::recv_ref`] or
+        /// [`StaticReceiver::try_recv_ref`] methods for recieving from the
+        /// channel, this allows allocations for channel messages to be reused
+        /// in place.
+        ///
+        /// # Errors
+        ///
+        /// If the [`StaticReceiver`] end of the channel has been dropped, this
+        /// returns a [`Closed`] error.
+        ///
+        /// # Examples
+        ///
+        /// Sending formatted strings by writing them directly to channel slots,
+        /// in place:
+        /// ```
+        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use std::{fmt::Write, thread};
+        ///
+        /// static CHANNEL: StaticChannel<String, 8> = StaticChannel::new();
+        ///
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// // Spawn a thread that prints each message received from the channel:
+        /// thread::spawn(move || {
+        ///     for _ in 0..10 {
+        ///         let msg = rx.recv_ref().unwrap();
+        ///         println!("{}", msg);
+        ///     }
+        /// });
+        ///
+        /// // Until the channel closes, write formatted messages to the channel.
+        /// let mut count = 1;
+        /// while let Ok(mut value) = tx.send_ref() {
+        ///     // Writing to the `SendRef` will reuse the *existing* string
+        ///     // allocation in place.
+        ///     write!(value, "hello from message {}", count)
+        ///         .expect("writing to a `String` should never fail");
+        ///     count += 1;
+        /// }
+        /// ```
+        ///
+        /// [`send`]: Self::send
         pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
             send_ref(self.core, self.slots, self.recycle)
         }
 
+        /// Sends a message by value, blocking until there is a free slot to
+        /// write to.
+        ///
+        /// This method takes the message by value, and replaces any previous
+        /// value in the slot. This means that the channel will *not* function
+        /// as an object pool while sending messages with `send`. This method is
+        /// most appropriate when messages don't own reusable heap allocations,
+        /// or when the [`StaticReceiver`] end of the channel must receive messages
+        /// by moving them out of the channel by value (using the
+        /// [`StaticReceiver::recv`] method). When messages in the channel own
+        /// reusable heap allocations (such as `String`s or `Vec`s), and the
+        /// [`StaticReceiver`] doesn't need to receive them by value, consider using
+        /// [`send_ref`] instead, to enable allocation reuse.
+        ///
+        /// # Errors
+        ///
+        /// If the [`StaticReceiver`] end of the channel has been dropped, this
+        /// returns a [`Closed`] error containing the sent value.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use std::{fmt::Write, thread};
+        ///
+        /// static CHANNEL: StaticChannel<i32, 8> = StaticChannel::new();
+        ///
+        /// // Spawn a thread that prints each message received from the channel:
+        /// thread::spawn(move || {
+        ///     for _ in 0..10 {
+        ///         let msg = rx.recv().unwrap();
+        ///         println!("received message {}", msg);
+        ///     }
+        /// });
+        ///
+        /// // Until the channel closes, write the current iteration to the channel.
+        /// let mut count = 1;
+        /// while tx.send(count).is_ok() {
+        ///     count += 1;
+        /// }
+        /// ```
+        /// [`send_ref`]: Self::send_ref
         pub fn send(&self, val: T) -> Result<(), Closed<T>> {
             match self.send_ref() {
                 Err(Closed(())) => Err(Closed(val)),
@@ -241,6 +342,67 @@ feature! {
                     Ok(())
                 }
             }
+        }
+
+        /// Attempts to reserve a slot in the channel to mutate in place,
+        /// without blocking until capacity is available.
+        ///
+        /// This method differs from [`send_ref`] by returning immediately if the
+        /// channel’s buffer is full or no [`StaticReceiver`] exists. Compared with
+        /// [`send_ref`], this method has two failure cases instead of one (one for
+        /// disconnection, one for a full buffer), and this method will never block.
+        ///
+        /// Like [`send_ref`], this method returns a [`SendRef`] that may be
+        /// used to mutate a slot in the channel's buffer in place. Dropping the
+        /// [`SendRef`] completes the send operation and makes the mutated value
+        /// available to the [`StaticReceiver`].
+        ///
+        /// # Errors
+        ///
+        /// If the channel capacity has been reached (i.e., the channel has `n`
+        /// buffered values where `n` is the `usize` const generic parameter of
+        /// the [`StaticChannel`]), then [`TrySendError::Full`] is returned. In
+        /// this case, a future call to `try_send` may succeed if additional
+        /// capacity becomes available.
+        ///
+        /// If the receive half of the channel is closed (i.e., the [`StaticReceiver`]
+        /// handle was dropped), the function returns [`TrySendError::Closed`].
+        /// Once the channel has closed, subsequent calls to `try_send_ref` will
+        /// never succeed.
+        ///
+        /// [`send_ref`]: Self::send_ref
+        pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
+            self.core
+                .try_send_ref(self.slots, self.recycle)
+                .map(SendRef)
+        }
+
+        /// Attempts to send a message by value immediately, without blocking until
+        /// capacity is available.
+        ///
+        /// This method differs from [`send`] by returning immediately if the
+        /// channel’s buffer is full or no [`StaticReceiver`] exists. Compared
+        /// with  [`send`], this method has two failure cases instead of one (one for
+        /// disconnection, one for a full buffer), and this method will never block.
+        ///
+        /// # Errors
+        ///
+        /// If the channel capacity has been reached (i.e., the channel has `n`
+        /// buffered values where `n` is the `usize` const generic parameter of
+        /// the [`StaticChannel`]), then [`TrySendError::Full`] is returned. In
+        /// this case, a future call to `try_send` may succeed if additional
+        /// capacity becomes available.
+        ///
+        /// If the receive half of the channel is closed (i.e., the
+        /// [`StaticReceiver`]  handle was dropped), the function returns
+        /// [`TrySendError::Closed`]. Once the channel has closed, subsequent
+        /// calls to `try_send` will  never succeed.
+        ///
+        /// In both cases, the error includes the value passed to `try_send`.
+        ///
+        /// [`send`]: Self::send
+        pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
+            self.core.try_send(self.slots, val, self.recycle)
         }
     }
 
@@ -282,10 +444,124 @@ feature! {
     // === impl StaticReceiver ===
 
     impl<T, R> StaticReceiver<T, R> {
+        /// Receives the next message for this receiver, **by reference**.
+        ///
+        /// This method returns `None` if the channel has been closed and there are
+        /// no remaining messages in the channel's buffer. This indicates that no
+        /// further values can ever be received from this `StaticReceiver`. The channel is
+        /// closed when all [`StaticSender`]s have been dropped.
+        ///
+        /// If there are no messages in the channel's buffer, but the channel has
+        /// not yet been closed, this method will block until a message is sent or
+        /// the channel is closed.
+        ///
+        /// This method returns a [`RecvRef`] that can be used to read from (or
+        /// mutate) the received message by reference. When the [`RecvRef`] is
+        /// dropped, the receive operation completes and the slot occupied by
+        /// the received message becomes usable for a future [`send_ref`] operation.
+        ///
+        /// If all [`StaticSender`]s for this channel write to the channel's
+        /// slots in place by using the [`send_ref`] or [`try_send_ref`]
+        /// methods, this method allows messages that own heap allocations to be reused in
+        /// place.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use std::{thread, fmt::Write};
+        ///
+        /// static CHANNEL: StaticChannel<String, 100> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// thread::spawn(move || {
+        ///     let mut value = tx.send_ref().unwrap();
+        ///     write!(value, "hello world!")
+        ///         .expect("writing to a `String` should never fail");
+        /// });
+        ///
+        /// assert_eq!(Some("hello world!"), rx.recv_ref().as_deref().map(String::as_str));
+        /// assert_eq!(None, rx.recv().await.as_deref());
+        /// # }
+        /// ```
+        ///
+        /// Values are buffered:
+        ///
+        /// ```
+        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use std::fmt::Write;
+        ///
+        /// static CHANNEL: StaticChannel<String, 100> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// write!(tx.send_ref().unwrap(), "hello").unwrap();
+        /// write!(tx.send_ref().unwrap(), "world").unwrap();
+        ///
+        /// assert_eq!("hello", rx.recv_ref().unwrap().as_str());
+        /// assert_eq!("world", rx.recv_ref().unwrap().as_str());
+        /// # }
+        /// ```
+        ///
+        /// [`send_ref`]: StaticSender::send_ref
+        /// [`try_send_ref`]: StaticSender::try_send_ref
         pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
             recv_ref(self.core, self.slots)
         }
 
+        /// Receives the next message for this receiver, **by value**.
+        ///
+        /// This method returns `None` if the channel has been closed and there are
+        /// no remaining messages in the channel's buffer. This indicates that no
+        /// further values can ever be received from this `StaticReceiver`. The channel is
+        /// closed when all [`StaticSender`]s have been dropped.
+        ///
+        /// If there are no messages in the channel's buffer, but the channel has
+        /// not yet been closed, this method will block until a message is sent or
+        /// the channel is closed.
+        ///
+        /// When a message is received, it is moved out of the channel by value,
+        /// and replaced with a new slot according to the configured [recycling
+        /// policy]. If all [`StaticSender`]s for this channel write to the channel's
+        /// slots in place by using the [`send_ref`] or [`try_send_ref`] methods,
+        /// consider using the [`recv_ref`] method instead, to enable the
+        /// reuse of heap allocations.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::sync::StaticChannel;
+        /// use std::thread;
+        ///
+        /// static CHANNEL: StaticChannel<i32, 100> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// thread::spawn(move || {
+        ///    tx.send(1).unwrap();
+        /// });
+        ///
+        /// assert_eq!(Some(1), rx.recv());
+        /// assert_eq!(None, rx.recv());
+        /// ```
+        ///
+        /// Values are buffered:
+        ///
+        /// ```
+        /// use thingbuf::mpsc::sync::StaticChannel;
+        ///
+        /// static CHANNEL: StaticChannel<i32, 100> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// tx.send(1).unwrap();
+        /// tx.send(2).unwrap();
+        ///
+        /// assert_eq!(Some(3), rx.recv());
+        /// assert_eq!(Some(4), rx.recv());
+        /// ```
+        ///
+        /// [`send_ref`]: StaticSender::send_ref
+        /// [`try_send_ref`]: StaticSender::try_send_ref
+        /// [recycling policy]: crate::recycling::Recycle
+        /// [`recv_ref`]: Self::recv_ref
         pub fn recv(&self) -> Option<T>
         where
             R: Recycle<T>,
@@ -294,6 +570,11 @@ feature! {
             Some(recycling::take(&mut *val, self.recycle))
         }
 
+        /// Returns `true` if the channel has closed (all corresponding
+        /// [`StaticSender`]s have been dropped).
+        ///
+        /// If this method returns `true`, no new messages will become available
+        /// on this channel. Previously sent messages may still be available.
         pub fn is_closed(&self) -> bool {
             test_dbg!(self.core.tx_count.load(Ordering::SeqCst)) <= 1
         }
@@ -325,10 +606,38 @@ feature! {
 }
 
 impl_send_ref! {
+    /// A reference to a message being sent to a blocking channel.
+    ///
+    /// A `SendRef` represents the exclusive permission to mutate a given
+    /// element in a channel. A `SendRef<T>` [implements `DerefMut<T>`] to allow
+    /// writing to that element. This is analogous to the [`Ref`] type, except
+    /// that it completes a `send_ref` or `try_send_ref` operation when it is
+    /// dropped.
+    ///
+    /// This type is returned by the [`Sender::send_ref`] and
+    /// [`Sender::try_send_ref`] (or [`StaticSender::send_ref`] and
+    /// [`StaticSender::try_send_ref`]) methods.
+    ///
+    /// [implements `DerefMut<T>`]: #impl-DerefMut
+    /// [`Ref`]: crate::Ref
     pub struct SendRef<Thread>;
 }
 
 impl_recv_ref! {
+    /// A reference to a message being received from a blocking channel.
+    ///
+    /// A `RecvRef` represents the exclusive permission to mutate a given
+    /// element in a channel. A `RecvRef<T>` [implements `DerefMut<T>`] to allow
+    /// writing to that element. This is analogous to the [`Ref`] type, except
+    /// that it completes a `recv_ref` or `poll_recv_ref` operation when it is
+    /// dropped.
+    ///
+    /// This type is returned by the [`Receiver::recv_ref`] and
+    /// [`Receiver::poll_recv_ref`] (or [`StaticReceiver::recv_ref`] and
+    /// [`StaticReceiver::poll_recv_ref`]) methods.
+    ///
+    /// [implements `DerefMut<T>`]: #impl-DerefMut
+    /// [`Ref`]: crate::Ref
     pub struct RecvRef<Thread>;
 }
 
@@ -338,19 +647,52 @@ impl<T, R> Sender<T, R>
 where
     R: Recycle<T>,
 {
-    pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
-        self.inner
-            .core
-            .try_send_ref(self.inner.slots.as_ref(), &self.inner.recycle)
-            .map(SendRef)
-    }
-
-    pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
-        self.inner
-            .core
-            .try_send(self.inner.slots.as_ref(), val, &self.inner.recycle)
-    }
-
+    /// Reserves a slot in the channel to mutate in place, blocking until
+    /// there is a free slot to write to.
+    ///
+    /// This is similar to the [`send`] method, but, rather than taking a
+    /// message by value to write to the channel, this method reserves a
+    /// writable slot in the channel, and returns a [`SendRef`] that allows
+    /// mutating the slot in place. If the [`Receiver`] end of the channel
+    /// uses the [`Receiver::recv_ref`] or [`Receiver::poll_recv_ref`]
+    /// methods for recieving from the channel, this allows allocations for
+    /// channel messages to be reused in place.
+    ///
+    /// # Errors
+    ///
+    /// If the [`Receiver`] end of the channel has been dropped, this
+    /// returns a [`Closed`] error.
+    ///
+    /// # Examples
+    ///
+    /// Sending formatted strings by writing them directly to channel slots,
+    /// in place:
+    /// ```
+    /// use thingbuf::mpsc::sync;
+    /// use std::{fmt::Write, thread};
+    ///
+    /// let (tx, rx) = sync::channel::<String>(8);
+    ///
+    /// // Spawn a thread that prints each message received from the channel:
+    /// thread::spawn(move || {
+    ///     for _ in 0..10 {
+    ///         let msg = rx.recv_ref().unwrap();
+    ///         println!("{}", msg);
+    ///     }
+    /// });
+    ///
+    /// // Until the channel closes, write formatted messages to the channel.
+    /// let mut count = 1;
+    /// while let Ok(mut value) = tx.send_ref() {
+    ///     // Writing to the `SendRef` will reuse the *existing* string
+    ///     // allocation in place.
+    ///     write!(value, "hello from message {}", count)
+    ///         .expect("writing to a `String` should never fail");
+    ///     count += 1;
+    /// }
+    /// ```
+    ///
+    /// [`send`]: Self::send
     pub fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
         send_ref(
             &self.inner.core,
@@ -359,6 +701,48 @@ where
         )
     }
 
+    /// Sends a message by value, blocking until there is a free slot to
+    /// write to.
+    ///
+    /// This method takes the message by value, and replaces any previous
+    /// value in the slot. This means that the channel will *not* function
+    /// as an object pool while sending messages with `send`. This method is
+    /// most appropriate when messages don't own reusable heap allocations,
+    /// or when the [`Receiver`] end of the channel must receive messages by
+    /// moving them out of the channel by value (using the
+    /// [`Receiver::recv`] method). When messages in the channel own
+    /// reusable heap allocations (such as `String`s or `Vec`s), and the
+    /// [`Receiver`] doesn't need to receive them by value, consider using
+    /// [`send_ref`] instead, to enable allocation reuse.
+    ///
+    /// # Errors
+    ///
+    /// If the [`Receiver`] end of the channel has been dropped, this
+    /// returns a [`Closed`] error containing the sent value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::sync;
+    /// use std::thread;
+    ///
+    /// let (tx, rx) = sync::channel(8);
+    ///
+    /// // Spawn a thread that prints each message received from the channel:
+    /// thread::spawn(move || {
+    ///     for _ in 0..10 {
+    ///         let msg = rx.recv().unwrap();
+    ///         println!("received message {}", msg);
+    ///     }
+    /// });
+    ///
+    /// // Until the channel closes, write the current iteration to the channel.
+    /// let mut count = 1;
+    /// while tx.send(count).is_ok() {
+    ///     count += 1;
+    /// }
+    /// ```
+    /// [`send_ref`]: Self::send_ref
     pub fn send(&self, val: T) -> Result<(), Closed<T>> {
         match self.send_ref() {
             Err(Closed(())) => Err(Closed(val)),
@@ -367,6 +751,70 @@ where
                 Ok(())
             }
         }
+    }
+
+    /// Attempts to reserve a slot in the channel to mutate in place,
+    /// without blocking until capacity is available.
+    ///
+    /// This method differs from [`send_ref`] by returning immediately if the
+    /// channel’s buffer is full or no [`Receiver`] exists. Compared with
+    /// [`send_ref`], this method has two failure cases instead of one (one for
+    /// disconnection, one for a full buffer), and this method will never block.
+    ///
+    /// Like [`send_ref`], this method returns a [`SendRef`] that may be
+    /// used to mutate a slot in the channel's buffer in place. Dropping the
+    /// [`SendRef`] completes the send operation and makes the mutated value
+    /// available to the [`Receiver`].
+    ///
+    /// # Errors
+    ///
+    /// If the channel capacity has been reached (i.e., the channel has `n`
+    /// buffered values where `n` is the argument passed to
+    /// [`channel`]/[`with_recycle`]), then [`TrySendError::Full`] is
+    /// returned. In this case, a future call to `try_send` may succeed if
+    /// additional capacity becomes available.
+    ///
+    /// If the receive half of the channel is closed (i.e., the [`Receiver`]
+    /// handle was dropped), the function returns [`TrySendError::Closed`].
+    /// Once the channel has closed, subsequent calls to `try_send_ref` will
+    /// never succeed.
+    ///
+    /// [`send_ref`]: Self::send_ref
+    pub fn try_send_ref(&self) -> Result<SendRef<'_, T>, TrySendError> {
+        self.inner
+            .core
+            .try_send_ref(self.inner.slots.as_ref(), &self.inner.recycle)
+            .map(SendRef)
+    }
+
+    /// Attempts to send a message by value immediately, without blocking until
+    /// capacity is available.
+    ///
+    /// This method differs from [`send`] by returning immediately if the
+    /// channel’s buffer is full or no [`Receiver`] exists. Compared with
+    /// [`send`], this method has two failure cases instead of one (one for
+    /// disconnection, one for a full buffer), and this method will never block.
+    ///
+    /// # Errors
+    ///
+    /// If the channel capacity has been reached (i.e., the channel has `n`
+    /// buffered values where `n` is the argument passed to
+    /// [`channel`]/[`with_recycle`]), then [`TrySendError::Full`] is
+    /// returned. In this case, a future call to `try_send` may succeed if
+    /// additional capacity becomes available.
+    ///
+    /// If the receive half of the channel is closed (i.e., the [`Receiver`]
+    /// handle was dropped), the function returns [`TrySendError::Closed`].
+    /// Once the channel has closed, subsequent calls to `try_send` will
+    /// never succeed.
+    ///
+    /// In both cases, the error includes the value passed to `try_send`.
+    ///
+    /// [`send`]: Self::send
+    pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
+        self.inner
+            .core
+            .try_send(self.inner.slots.as_ref(), val, &self.inner.recycle)
     }
 }
 
@@ -396,10 +844,120 @@ impl<T, R> Drop for Sender<T, R> {
 // === impl Receiver ===
 
 impl<T, R> Receiver<T, R> {
+    /// Receives the next message for this receiver, **by reference**.
+    ///
+    /// This method returns `None` if the channel has been closed and there are
+    /// no remaining messages in the channel's buffer. This indicates that no
+    /// further values can ever be received from this `Receiver`. The channel is
+    /// closed when all [`Sender`]s have been dropped.
+    ///
+    /// If there are no messages in the channel's buffer, but the channel has
+    /// not yet been closed, this method will block until a message is sent or
+    /// the channel is closed.
+    ///
+    /// This method returns a [`RecvRef`] that can be used to read from (or
+    /// mutate) the received message by reference. When the [`RecvRef`] is
+    /// dropped, the receive operation completes and the slot occupied by
+    /// the received message becomes usable for a future [`send_ref`] operation.
+    ///
+    /// If all [`Sender`]s for this channel write to the channel's slots in
+    /// place by using the [`send_ref`] or [`try_send_ref`] methods, this
+    /// method allows messages that own heap allocations to be reused in
+    /// place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::sync;
+    /// use std::{thread, fmt::Write};
+    ///
+    /// let (tx, rx) = sync::channel::<String>(100);
+    ///
+    /// thread::spawn(move || {
+    ///     let mut value = tx.send_ref().unwrap();
+    ///     write!(value, "hello world!")
+    ///         .expect("writing to a `String` should never fail");
+    /// });
+    ///
+    /// assert_eq!(Some("hello world!"), rx.recv_ref().as_deref().map(String::as_str));
+    /// assert_eq!(None, rx.recv().await.as_deref());
+    /// # }
+    /// ```
+    ///
+    /// Values are buffered:
+    ///
+    /// ```
+    /// use thingbuf::mpsc::sync;
+    /// use std::fmt::Write;
+    ///
+    /// let (tx, rx) = sync::channel::<String>(100);
+    ///
+    /// write!(tx.send_ref().unwrap(), "hello").unwrap();
+    /// write!(tx.send_ref().unwrap(), "world").unwrap();
+    ///
+    /// assert_eq!("hello", rx.recv_ref().unwrap().as_str());
+    /// assert_eq!("world", rx.recv_ref().unwrap().as_str());
+    /// # }
+    /// ```
+    ///
+    /// [`send_ref`]: Sender::send_ref
+    /// [`try_send_ref`]: Sender::try_send_ref
     pub fn recv_ref(&self) -> Option<RecvRef<'_, T>> {
         recv_ref(&self.inner.core, self.inner.slots.as_ref())
     }
 
+    /// Receives the next message for this receiver, **by value**.
+    ///
+    /// This method returns `None` if the channel has been closed and there are
+    /// no remaining messages in the channel's buffer. This indicates that no
+    /// further values can ever be received from this `Receiver`. The channel is
+    /// closed when all [`Sender`]s have been dropped.
+    ///
+    /// If there are no messages in the channel's buffer, but the channel has
+    /// not yet been closed, this method will block until a message is sent or
+    /// the channel is closed.
+    ///
+    /// When a message is received, it is moved out of the channel by value,
+    /// and replaced with a new slot according to the configured [recycling
+    /// policy]. If all [`Sender`]s for this channel write to the channel's
+    /// slots in place by using the [`send_ref`] or [`try_send_ref`] methods,
+    /// consider using the [`recv_ref`] method instead, to enable the
+    /// reuse of heap allocations.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::sync;
+    /// use std::{thread, fmt::Write};
+    ///
+    /// let (tx, rx) = sync::channel(100);
+    ///
+    /// thread::spawn(move || {
+    ///    tx.send(1).unwrap();
+    /// });
+    ///
+    /// assert_eq!(Some(1), rx.recv());
+    /// assert_eq!(None, rx.recv());
+    /// ```
+    ///
+    /// Values are buffered:
+    ///
+    /// ```
+    /// use thingbuf::mpsc::sync;
+    ///
+    /// let (tx, rx) = sync::channel(100);
+    ///
+    /// tx.send(1).unwrap();
+    /// tx.send(2).unwrap();
+    ///
+    /// assert_eq!(Some(3), rx.recv());
+    /// assert_eq!(Some(4), rx.recv());
+    /// ```
+    ///
+    /// [`send_ref`]: Sender::send_ref
+    /// [`try_send_ref`]: Sender::try_send_ref
+    /// [recycling policy]: crate::recycling::Recycle
+    /// [`recv_ref`]: Self::recv_ref
     pub fn recv(&self) -> Option<T>
     where
         R: Recycle<T>,
@@ -408,6 +966,11 @@ impl<T, R> Receiver<T, R> {
         Some(recycling::take(&mut *val, &self.inner.recycle))
     }
 
+    /// Returns `true` if the channel has closed (all corresponding
+    /// [`Sender`]s have been dropped).
+    ///
+    /// If this method returns `true`, no new messages will become available
+    /// on this channel. Previously sent messages may still be available.
     pub fn is_closed(&self) -> bool {
         test_dbg!(self.inner.core.tx_count.load(Ordering::SeqCst)) <= 1
     }
