@@ -1,6 +1,7 @@
-#![cfg_attr(docsrs, doc = include_str!("../README.md"))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
 use core::{cmp, fmt, mem::MaybeUninit, ops, ptr};
 #[macro_use]
 mod macros;
@@ -13,7 +14,7 @@ mod wait;
 
 pub use self::recycling::Recycle;
 
-#[cfg_attr(docsrs, doc = include_str!("../mpsc_perf_comparison.md"))]
+#[doc = include_str!("../mpsc_perf_comparison.md")]
 pub mod mpsc_perf_comparison {
     // Empty module, used only for documentation.
 }
