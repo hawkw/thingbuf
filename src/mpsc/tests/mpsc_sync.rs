@@ -29,7 +29,7 @@ fn mpsc_try_send_recv() {
         let mut vals = Vec::new();
 
         for val in &rx {
-            val.with(|val| vals.push(*val));
+            vals.push(*val);
         }
 
         vals.sort_unstable();

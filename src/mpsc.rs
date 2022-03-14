@@ -223,12 +223,12 @@ impl<T, N: Notify> core::ops::DerefMut for SendRefInner<'_, T, N> {
 
 impl<T, N: Notify> SendRefInner<'_, T, N> {
     #[inline]
-    pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
+    pub(crate) fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
         self.slot.with(f)
     }
 
     #[inline]
-    pub fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
+    pub(crate) fn with_mut<U>(&mut self, f: impl FnOnce(&mut T) -> U) -> U {
         self.slot.with_mut(f)
     }
 }
