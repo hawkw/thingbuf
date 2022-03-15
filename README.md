@@ -8,6 +8,7 @@
 [![Documentation (`main` branch)][docs-main-badge]][docs-main-url]
 [![MIT licensed][mit-badge]][mit-url]
 [![Build Status][actions-badge]][actions-url]
+[![Sponsor @hawkw on GitHub Sponsors][sponsor-badge]][sponsor-url]
 
 [crates-badge]: https://img.shields.io/crates/v/thingbuf.svg
 [crates-url]: https://crates.io/crates/thingbuf
@@ -17,6 +18,9 @@
 [docs-main-url]: https://thingbuf.elizas.website
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: ../LICENSE
+[sponsor-badge]: https://img.shields.io/badge/sponsor-%F0%9F%A4%8D-ff69b4
+[sponsor-url]: https://github.com/sponsors/hawkw
+
 ## What Is It?
 
 `thingbuf` is a lock-free array-based concurrent ring buffer that allows access
