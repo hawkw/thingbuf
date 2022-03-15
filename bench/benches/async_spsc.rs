@@ -22,7 +22,7 @@ aaaaaaaaaaaaaa";
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             let rt = runtime::Builder::new_current_thread().build().unwrap();
             b.to_async(rt).iter(|| async {
-                use thingbuf::mpsc::{self, TrySendError};
+                use thingbuf::mpsc::{self, errors::TrySendError};
 
                 let (tx, rx) = mpsc::channel::<String>(100);
                 task::spawn(async move {
@@ -265,7 +265,7 @@ fn bench_spsc_try_send_integer(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             let rt = runtime::Builder::new_current_thread().build().unwrap();
             b.to_async(rt).iter(|| async {
-                use thingbuf::mpsc::{self, TrySendError};
+                use thingbuf::mpsc::{self, errors::TrySendError};
                 let (tx, rx) = mpsc::channel(100);
                 task::spawn(async move {
                     let mut i = 0;
