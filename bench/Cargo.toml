@@ -7,15 +7,13 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["parking_lot"]
+default = []
 # These feature flags can be disabled if we don't want to run comparison
 # benchmarks, such as when just comparing two `thingbuf` versions.
 comparisons = ["crossbeam", "async-std", "futures", "tokio-sync", "std-sync"]
 tokio-sync = ["tokio/sync"]
 std-sync = []
 
-# Use parking_lot mutexes in `thingbuf` 
-parking_lot = ["thingbuf/parking_lot"]
 
 [dependencies]
 thingbuf = { path = ".." }
