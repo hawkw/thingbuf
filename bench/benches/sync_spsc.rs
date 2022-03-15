@@ -20,7 +20,7 @@ aaaaaaaaaaaaaa";
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::new("ThingBuf", size), &size, |b, &i| {
             b.iter(|| {
-                use thingbuf::mpsc::{blocking, TrySendError};
+                use thingbuf::mpsc::{blocking, errors::TrySendError};
                 let (tx, rx) = blocking::channel::<String>(100);
                 let producer = thread::spawn(move || loop {
                     match tx.try_send_ref() {

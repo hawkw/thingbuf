@@ -387,7 +387,7 @@ where
         self.core
             .push_ref(&*self.slots, &self.recycle)
             .map_err(|e| match e {
-                crate::mpsc::TrySendError::Full(()) => Full(()),
+                crate::mpsc::errors::TrySendError::Full(()) => Full(()),
                 _ => unreachable!(),
             })
     }

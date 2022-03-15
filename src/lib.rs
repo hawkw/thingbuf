@@ -38,6 +38,7 @@ use crate::{
         atomic::{AtomicUsize, Ordering::*},
         cell::{MutPtr, UnsafeCell},
     },
+    mpsc::errors::TrySendError,
     util::{Backoff, CachePadded},
 };
 
@@ -172,7 +173,7 @@ impl Core {
         &self,
         slots: &'slots S,
         recycle: &R,
-    ) -> Result<Ref<'slots, T>, mpsc::TrySendError<()>>
+    ) -> Result<Ref<'slots, T>, TrySendError<()>>
     where
         R: Recycle<T>,
         S: ops::Index<usize, Output = Slot<T>> + ?Sized,
@@ -183,7 +184,7 @@ impl Core {
 
         loop {
             if test_dbg!(tail & self.closed != 0) {
-                return Err(mpsc::TrySendError::Closed(()));
+                return Err(TrySendError::Closed(()));
             }
             let (idx, gen) = self.idx_gen(tail);
             test_dbg!(idx);
@@ -247,7 +248,7 @@ impl Core {
                 let head = test_dbg!(self.head.fetch_or(0, SeqCst));
                 if test_dbg!(head.wrapping_add(self.gen) == tail) {
                     test_println!("channel full");
-                    return Err(mpsc::TrySendError::Full(()));
+                    return Err(TrySendError::Full(()));
                 }
 
                 backoff.spin();
@@ -260,7 +261,7 @@ impl Core {
     }
 
     #[inline(always)]
-    fn pop_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, mpsc::TrySendError>
+    fn pop_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, TrySendError>
     where
         S: ops::Index<usize, Output = Slot<T>> + ?Sized,
     {
@@ -313,15 +314,15 @@ impl Core {
 
                 if test_dbg!(tail & !self.closed == head) {
                     return if test_dbg!(tail & self.closed != 0) {
-                        Err(mpsc::TrySendError::Closed(()))
+                        Err(TrySendError::Closed(()))
                     } else {
                         test_println!("--> channel full!");
-                        Err(mpsc::TrySendError::Full(()))
+                        Err(TrySendError::Full(()))
                     };
                 }
 
                 if test_dbg!(backoff.done_spinning()) {
-                    return Err(mpsc::TrySendError::Full(()));
+                    return Err(TrySendError::Full(()));
                 }
 
                 backoff.spin();

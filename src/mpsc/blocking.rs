@@ -16,6 +16,7 @@ use crate::{
     Ref,
 };
 use core::{fmt, pin::Pin};
+use errors::*;
 
 /// Returns a new synchronous multi-producer, single consumer (MPSC)
 /// channel with  the provided capacity.
