@@ -666,7 +666,7 @@ where
     /// use thingbuf::mpsc::blocking;
     /// use std::{fmt::Write, thread};
     ///
-    /// let (tx, rx) = sync::channel::<String>(8);
+    /// let (tx, rx) = blocking::channel::<String>(8);
     ///
     /// // Spawn a thread that prints each message received from the channel:
     /// thread::spawn(move || {
@@ -721,7 +721,7 @@ where
     /// use thingbuf::mpsc::blocking;
     /// use std::thread;
     ///
-    /// let (tx, rx) = sync::channel(8);
+    /// let (tx, rx) = blocking::channel(8);
     ///
     /// // Spawn a thread that prints each message received from the channel:
     /// thread::spawn(move || {
@@ -866,7 +866,7 @@ impl<T, R> Receiver<T, R> {
     /// use thingbuf::mpsc::blocking;
     /// use std::{thread, fmt::Write};
     ///
-    /// let (tx, rx) = sync::channel::<String>(100);
+    /// let (tx, rx) = blocking::channel::<String>(100);
     ///
     /// thread::spawn(move || {
     ///     let mut value = tx.send_ref().unwrap();
@@ -884,7 +884,7 @@ impl<T, R> Receiver<T, R> {
     /// use thingbuf::mpsc::blocking;
     /// use std::fmt::Write;
     ///
-    /// let (tx, rx) = sync::channel::<String>(100);
+    /// let (tx, rx) = blocking::channel::<String>(100);
     ///
     /// write!(tx.send_ref().unwrap(), "hello").unwrap();
     /// write!(tx.send_ref().unwrap(), "world").unwrap();
@@ -923,7 +923,7 @@ impl<T, R> Receiver<T, R> {
     /// use thingbuf::mpsc::blocking;
     /// use std::{thread, fmt::Write};
     ///
-    /// let (tx, rx) = sync::channel(100);
+    /// let (tx, rx) = blocking::channel(100);
     ///
     /// thread::spawn(move || {
     ///    tx.send(1).unwrap();
@@ -938,7 +938,7 @@ impl<T, R> Receiver<T, R> {
     /// ```
     /// use thingbuf::mpsc::blocking;
     ///
-    /// let (tx, rx) = sync::channel(100);
+    /// let (tx, rx) = blocking::channel(100);
     ///
     /// tx.send(1).unwrap();
     /// tx.send(2).unwrap();
