@@ -9,6 +9,7 @@ use core::fmt;
 /// [`StaticSender::try_send`]: super::StaticSender::try_send
 /// [`StaticSender::try_send_ref`]: super::StaticSender::try_send_ref
 #[non_exhaustive]
+#[derive(PartialEq, Eq)]
 pub enum TrySendError<T = ()> {
     /// The data could not be sent on the channel because the channel is
     /// currently full and sending would require waiting for capacity.
@@ -29,6 +30,7 @@ pub enum TrySendError<T = ()> {
 /// [`StaticSender::send`]: super::StaticSender::send
 /// [`StaticSender::send_ref`]: super::StaticSender::send_ref
 /// [`Receiver`]: super::Receiver
+#[derive(PartialEq, Eq)]
 pub struct Closed<T = ()>(pub(crate) T);
 
 // === impl Closed ===
