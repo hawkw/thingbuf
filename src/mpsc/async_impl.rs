@@ -11,6 +11,7 @@ use core::{
     pin::Pin,
     task::{Context, Poll, Waker},
 };
+use errors::*;
 
 feature! {
     #![feature = "alloc"]

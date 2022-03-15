@@ -18,21 +18,8 @@ use crate::{
 };
 use core::{fmt, ops::Index, task::Poll};
 
-/// Error returned by the [`Sender::try_send`] (and [`StaticSender::try_send`])
-/// methods.
-#[non_exhaustive]
-pub enum TrySendError<T = ()> {
-    /// The data could not be sent on the channel because the channel is
-    /// currently full and sending would require waiting for capacity.
-    Full(T),
-    /// The data could not be sent because the [`Receiver`] half of the channel
-    /// has been dropped.
-    Closed(T),
-}
-
-/// Error returned by [`Sender::send`] and [`Sender::send_ref`], if the
-/// [`Receiver`] half of the channel has been dropped.
-pub struct Closed<T = ()>(T);
+pub mod errors;
+use self::errors::TrySendError;
 
 #[derive(Debug)]
 struct ChannelCore<N> {
@@ -64,93 +51,6 @@ struct SendRefInner<'a, T, N: Notify> {
 
 struct NotifyRx<'a, N: Notify>(&'a WaitCell<N>);
 struct NotifyTx<'a, N: Notify + Unpin>(&'a WaitQueue<N>);
-
-// === impl Closed ===
-
-impl<T> Closed<T> {
-    /// Unwraps the inner `T` value held by this error.
-    ///
-    /// This method allows recovering the original message when sending to a
-    /// channel has failed.
-    pub fn into_inner(self) -> T {
-        self.0
-    }
-}
-
-impl<T> fmt::Debug for Closed<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Closed(..)")
-    }
-}
-
-impl<T> fmt::Display for Closed<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("channel closed")
-    }
-}
-
-#[cfg(feature = "std")]
-impl<T> std::error::Error for Closed<T> {}
-
-// === impl TrySendError ===
-
-impl TrySendError {
-    fn with_value<T>(self, value: T) -> TrySendError<T> {
-        match self {
-            Self::Full(()) => TrySendError::Full(value),
-            Self::Closed(()) => TrySendError::Closed(value),
-        }
-    }
-}
-
-impl<T> TrySendError<T> {
-    /// Returns `true` if this error was returned because the channel was at
-    /// capacity.
-    pub fn is_full(&self) -> bool {
-        matches!(self, Self::Full(_))
-    }
-
-    /// Returns `true` if this error was returned because the channel has closed
-    /// (e.g. the `Receiver` end has been dropped).
-    ///
-    /// If this returns `true`, no future `try_send` or `send` operation on this
-    /// channel will succeed.
-    pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Full(_))
-    }
-
-    /// Unwraps the inner `T` value held by this error.
-    ///
-    /// This method allows recovering the original message when sending to a
-    /// channel has failed.
-    pub fn into_inner(self) -> T {
-        match self {
-            Self::Full(val) => val,
-            Self::Closed(val) => val,
-        }
-    }
-}
-
-impl<T> fmt::Debug for TrySendError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Full(_) => "TrySendError::Full(..)",
-            Self::Closed(_) => "TrySendError::Closed(..)",
-        })
-    }
-}
-
-impl<T> fmt::Display for TrySendError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Full(_) => "no available capacity",
-            Self::Closed(_) => "channel closed",
-        })
-    }
-}
-
-#[cfg(feature = "std")]
-impl<T> std::error::Error for TrySendError<T> {}
 
 // ==== impl Inner ====
 
