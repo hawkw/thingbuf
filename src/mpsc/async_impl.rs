@@ -100,32 +100,31 @@ feature! {
         /// Sending formatted strings by writing them directly to channel slots,
         /// in place:
         /// ```
-        /// # mod tokio {
-        /// # pub fn spawn(_: impl std::future::Future) {}
-        /// # }
         /// use thingbuf::mpsc;
         /// use std::fmt::Write;
         ///
-        /// # async fn example() {
-        /// let (tx, rx) = mpsc::channel::<String>(8);
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = mpsc::channel::<String>(8);
         ///
-        /// // Spawn a task that prints each message received from the channel:
-        /// tokio::spawn(async move {
-        ///     while let Some(msg) = rx.recv_ref().await {
-        ///         println!("{}", msg);
+        ///     // Spawn a task that prints each message received from the channel:
+        ///     tokio::spawn(async move {
+        ///         for _ in 0..10 {
+        ///             let msg = rx.recv_ref().await.unwrap();
+        ///             println!("{}", msg);
+        ///         }
+        ///     });
+        ///
+        ///     // Until the channel closes, write formatted messages to the channel.
+        ///     let mut count = 1;
+        ///     while let Ok(mut value) = tx.send_ref().await {
+        ///         // Writing to the `SendRef` will reuse the *existing* string
+        ///         // allocation in place.
+        ///         write!(value, "hello from message {}", count)
+        ///             .expect("writing to a `String` should never fail");
+        ///         count += 1;
         ///     }
-        /// });
-        ///
-        /// // Until the channel closes, write formatted messages to the channel.
-        /// let mut count = 1;
-        /// while let Ok(mut value) = tx.send_ref().await {
-        ///     // Writing to the `SendRef` will reuse the *existing* string
-        ///     // allocation in place.
-        ///     write!(value, "hello from message {}", count)
-        ///         .expect("writing to a `String` should never fail");
-        ///     count += 1;
         /// }
-        /// # }
         /// ```
         /// [`send`]: Self::send
         pub async fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
@@ -161,26 +160,26 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// # mod tokio {
-        /// # pub fn spawn(_: impl std::future::Future) {}
-        /// # }
         /// use thingbuf::mpsc;
-        /// # async fn example() {
-        /// let (tx, rx) = mpsc::channel(8);
         ///
-        /// // Spawn a task that prints each message received from the channel:
-        /// tokio::spawn(async move {
-        ///     while let Some(msg) = rx.recv().await {
-        ///         println!("received message {}", msg);
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = mpsc::channel(8);
+        ///
+        ///     // Spawn a task that prints each message received from the channel:
+        ///     tokio::spawn(async move {
+        ///         for _ in 0..10 {
+        ///             let msg = rx.recv().await.unwrap();
+        ///             println!("received message {}", msg);
+        ///         }
+        ///     });
+        ///
+        ///     // Until the channel closes, write the current iteration to the channel.
+        ///     let mut count = 1;
+        ///     while tx.send(count).await.is_ok() {
+        ///         count += 1;
         ///     }
-        /// });
-        ///
-        /// // Until the channel closes, write the current iteration to the channel.
-        /// let mut count = 1;
-        /// while tx.send(count).await.is_ok() {
-        ///     count += 1;
         /// }
-        /// # }
         /// ```
         /// [`send_ref`]: Self::send_ref
         pub async fn send(&self, val: T) -> Result<(), Closed<T>> {
@@ -309,41 +308,39 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// # mod tokio {
-        /// # pub fn spawn(_: impl std::future::Future) {}
-        /// # }
-        /// # async fn docs() {
         /// use thingbuf::mpsc;
         /// use std::fmt::Write;
         ///
-        /// let (tx, rx) = mpsc::channel::<String>(100);
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = mpsc::channel::<String>(100);
+        ///     tokio::spawn(async move {
+        ///         let mut value = tx.send_ref().await.unwrap();
+        ///         write!(value, "hello world!")
+        ///             .expect("writing to a `String` should never fail");
+        ///     });
         ///
-        /// tokio::spawn(async move {
-        ///     let mut value = tx.send_ref().await.unwrap();
-        ///     write!(value, "hello world!")
-        ///         .expect("writing to a `String` should never fail");
-        /// });
-        ///
-        /// assert_eq!(Some("hello world!"), rx.recv_ref().await.as_deref().map(String::as_str));
-        /// assert_eq!(None, rx.recv().await.as_deref());
-        /// # }
+        ///     assert_eq!(Some("hello world!"), rx.recv_ref().await.as_deref().map(String::as_str));
+        ///     assert_eq!(None, rx.recv().await.as_deref());
+        /// }
         /// ```
         ///
         /// Values are buffered:
         ///
         /// ```
-        /// # async fn docs() {
         /// use thingbuf::mpsc;
         /// use std::fmt::Write;
         ///
-        /// let (tx, rx) = mpsc::channel::<String>(100);
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = mpsc::channel::<String>(100);
         ///
-        /// write!(tx.send_ref().await.unwrap(), "hello").unwrap();
-        /// write!(tx.send_ref().await.unwrap(), "world").unwrap();
+        ///     write!(tx.send_ref().await.unwrap(), "hello").unwrap();
+        ///     write!(tx.send_ref().await.unwrap(), "world").unwrap();
         ///
-        /// assert_eq!("hello", rx.recv_ref().await.unwrap().as_str());
-        /// assert_eq!("world", rx.recv_ref().await.unwrap().as_str());
-        /// # }
+        ///     assert_eq!("hello", rx.recv_ref().await.unwrap().as_str());
+        ///     assert_eq!("world", rx.recv_ref().await.unwrap().as_str());
+        /// }
         /// ```
         ///
         /// [`send_ref`]: Sender::send_ref
@@ -376,37 +373,37 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// # mod tokio {
-        /// # pub fn spawn(_: impl std::future::Future) {}
-        /// # }
-        /// # async fn docs() {
         /// use thingbuf::mpsc;
         ///
-        /// let (tx, rx) = mpsc::channel(100);
+        /// #[tokio::main]
+        /// async fn main() {
         ///
-        /// tokio::spawn(async move {
-        ///    tx.send(1).await.unwrap();
-        /// });
+        ///     let (tx, rx) = mpsc::channel(100);
         ///
-        /// assert_eq!(Some(1), rx.recv().await);
-        /// assert_eq!(None, rx.recv().await);
-        /// # }
+        ///     tokio::spawn(async move {
+        ///         tx.send(1).await.unwrap();
+        ///     });
+        ///
+        ///     assert_eq!(Some(1), rx.recv().await);
+        ///     assert_eq!(None, rx.recv().await);
+        /// }
         /// ```
         ///
         /// Values are buffered:
         ///
         /// ```
-        /// # async fn docs() {
         /// use thingbuf::mpsc;
         ///
-        /// let (tx, rx) = mpsc::channel(100);
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = mpsc::channel(100);
         ///
-        /// tx.send(1).await.unwrap();
-        /// tx.send(2).await.unwrap();
+        ///     tx.send(1).await.unwrap();
+        ///     tx.send(2).await.unwrap();
         ///
-        /// assert_eq!(Some(1), rx.recv().await);
-        /// assert_eq!(Some(2), rx.recv().await);
-        /// # }
+        ///     assert_eq!(Some(1), rx.recv().await);
+        ///     assert_eq!(Some(2), rx.recv().await);
+        /// }
         /// ```
         ///
         /// [`send_ref`]: Sender::send_ref
@@ -717,34 +714,35 @@ feature! {
         ///
         /// Sending formatted strings by writing them directly to channel slots,
         /// in place:
+        ///
         /// ```
-        /// # mod tokio {
-        /// # pub fn spawn(_: impl std::future::Future) {}
-        /// # }
         /// use thingbuf::mpsc;
         /// use std::fmt::Write;
         ///
-        /// # async fn example() {
         /// static CHANNEL: mpsc::StaticChannel<String, 8> = mpsc::StaticChannel::new();
-        /// let (tx, rx) = CHANNEL.split();
         ///
-        /// // Spawn a task that prints each message received from the channel:
-        /// tokio::spawn(async move {
-        ///     while let Some(msg) = rx.recv_ref().await {
-        ///         println!("{}", msg);
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = CHANNEL.split();
+        ///
+        ///     // Spawn a task that prints each message received from the channel:
+        ///     tokio::spawn(async move {
+        ///         for _ in 0..10 {
+        ///             let msg = rx.recv_ref().await.unwrap();
+        ///             println!("{}", msg);
+        ///         }
+        ///     });
+        ///
+        ///     // Until the channel closes, write formatted messages to the channel.
+        ///     let mut count = 1;
+        ///     while let Ok(mut value) = tx.send_ref().await {
+        ///         // Writing to the `SendRef` will reuse the *existing* string
+        ///         // allocation in place.
+        ///         write!(value, "hello from message {}", count)
+        ///             .expect("writing to a `String` should never fail");
+        ///         count += 1;
         ///     }
-        /// });
-        ///
-        /// // Until the channel closes, write formatted messages to the channel.
-        /// let mut count = 1;
-        /// while let Ok(mut value) = tx.send_ref().await {
-        ///     // Writing to the `SendRef` will reuse the *existing* string
-        ///     // allocation in place.
-        ///     write!(value, "hello from message {}", count)
-        ///         .expect("writing to a `String` should never fail");
-        ///     count += 1;
         /// }
-        /// # }
         /// ```
         /// [`send`]: Self::send
         pub async fn send_ref(&self) -> Result<SendRef<'_, T>, Closed> {
@@ -780,28 +778,28 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// # mod tokio {
-        /// # pub fn spawn(_: impl std::future::Future) {}
-        /// # }
         /// use thingbuf::mpsc;
-        /// # async fn example() {
         ///
         /// static CHANNEL: mpsc::StaticChannel<i32, 8> = mpsc::StaticChannel::new();
-        /// let (tx, rx) = CHANNEL.split();
         ///
-        /// // Spawn a task that prints each message received from the channel:
-        /// tokio::spawn(async move {
-        ///     while let Some(msg) = rx.recv().await {
-        ///         println!("received message {}", msg);
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = CHANNEL.split();
+        ///
+        ///     // Spawn a task that prints each message received from the channel:
+        ///     tokio::spawn(async move {
+        ///         for _ in 0..10 {
+        ///             let msg = rx.recv().await.unwrap();
+        ///             println!("received message {}", msg);
+        ///         }
+        ///     });
+        ///
+        ///     // Until the channel closes, write the current iteration to the channel.
+        ///     let mut count = 1;
+        ///     while tx.send(count).await.is_ok() {
+        ///         count += 1;
         ///     }
-        /// });
-        ///
-        /// // Until the channel closes, write the current iteration to the channel.
-        /// let mut count = 1;
-        /// while tx.send(count).await.is_ok() {
-        ///     count += 1;
         /// }
-        /// # }
         /// ```
         /// [`send_ref`]: Self::send_ref
         pub async fn send(&self, val: T) -> Result<(), Closed<T>> {
@@ -939,44 +937,44 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// # mod tokio {
-        /// # pub fn spawn(_: impl std::future::Future) {}
-        /// # }
-        /// # async fn docs() {
         /// use thingbuf::mpsc::StaticChannel;
         /// use std::fmt::Write;
         ///
         /// static CHANNEL: StaticChannel<String, 100> = StaticChannel::new();
-        /// let (tx, rx) = CHANNEL.split();
         ///
-        /// tokio::spawn(async move {
-        ///     let mut value = tx.send_ref().await.unwrap();
-        ///     write!(value, "hello world!")
-        ///         .expect("writing to a `String` should never fail");
-        /// });
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = CHANNEL.split();
         ///
-        /// assert_eq!(Some("hello world!"), rx.recv_ref().await.as_deref().map(String::as_str));
-        /// assert_eq!(None, rx.recv().await.as_deref());
-        /// # }
+        ///     tokio::spawn(async move {
+        ///         let mut value = tx.send_ref().await.unwrap();
+        ///         write!(value, "hello world!")
+        ///             .expect("writing to a `String` should never fail");
+        ///     });
+        ///
+        ///     assert_eq!(Some("hello world!"), rx.recv_ref().await.as_deref().map(String::as_str));
+        ///     assert_eq!(None, rx.recv().await.as_deref());
+        /// }
         /// ```
         ///
         /// Values are buffered:
         ///
         /// ```
-        /// # async fn docs() {
         /// use thingbuf::mpsc::StaticChannel;
         /// use std::fmt::Write;
         ///
         /// static CHANNEL: StaticChannel<String, 100> = StaticChannel::new();
         ///
-        /// let (tx, rx) = CHANNEL.split();
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = CHANNEL.split();
         ///
-        /// write!(tx.send_ref().await.unwrap(), "hello").unwrap();
-        /// write!(tx.send_ref().await.unwrap(), "world").unwrap();
+        ///     write!(tx.send_ref().await.unwrap(), "hello").unwrap();
+        ///     write!(tx.send_ref().await.unwrap(), "world").unwrap();
         ///
-        /// assert_eq!("hello", rx.recv_ref().await.unwrap().as_str());
-        /// assert_eq!("world", rx.recv_ref().await.unwrap().as_str());
-        /// # }
+        ///     assert_eq!("hello", rx.recv_ref().await.unwrap().as_str());
+        ///     assert_eq!("world", rx.recv_ref().await.unwrap().as_str());
+        /// }
         /// ```
         ///
         /// [`send_ref`]: StaticSender::send_ref
@@ -1009,39 +1007,40 @@ feature! {
         /// # Examples
         ///
         /// ```
-        /// # mod tokio {
-        /// # pub fn spawn(_: impl std::future::Future) {}
-        /// # }
-        /// # async fn docs() {
         /// use thingbuf::mpsc::StaticChannel;
         ///
         /// static CHANNEL: StaticChannel<i32, 100> = StaticChannel::new();
-        /// let (tx, rx) = CHANNEL.split();
         ///
-        /// tokio::spawn(async move {
-        ///    tx.send(1).await.unwrap();
-        /// });
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = CHANNEL.split();
         ///
-        /// assert_eq!(Some(1), rx.recv().await);
-        /// assert_eq!(None, rx.recv().await);
-        /// # }
+        ///     tokio::spawn(async move {
+        ///         tx.send(1).await.unwrap();
+        ///     });
+        ///
+        ///     assert_eq!(Some(1), rx.recv().await);
+        ///     assert_eq!(None, rx.recv().await);
+        /// }
         /// ```
         ///
         /// Values are buffered:
         ///
         /// ```
-        /// # async fn docs() {
         /// use thingbuf::mpsc::StaticChannel;
         ///
         /// static CHANNEL: StaticChannel<i32, 100> = StaticChannel::new();
-        /// let (tx, rx) = CHANNEL.split();
         ///
-        /// tx.send(1).await.unwrap();
-        /// tx.send(2).await.unwrap();
+        /// #[tokio::main]
+        /// async fn main() {
+        ///     let (tx, rx) = CHANNEL.split();
         ///
-        /// assert_eq!(Some(1), rx.recv().await);
-        /// assert_eq!(Some(2), rx.recv().await);
-        /// # }
+        ///     tx.send(1).await.unwrap();
+        ///     tx.send(2).await.unwrap();
+        ///
+        ///     assert_eq!(Some(1), rx.recv().await);
+        ///     assert_eq!(Some(2), rx.recv().await);
+        /// }
         /// ```
         ///
         /// [`send_ref`]: StaticSender::send_ref
