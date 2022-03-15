@@ -64,8 +64,12 @@ pub struct Ref<'slot, T> {
     new_state: usize,
 }
 
-/// Error returned when sending a message failed because a channel is at capacity.
-#[derive(Eq, PartialEq)]
+/// Error indicating that a `push` operation failed because a queue was at
+/// capacity.
+///
+/// This is returned by the [`ThingBuf::push`] and [`ThingBuf::push_ref`] (and
+/// [`StaticThingBuf::push`]/[`StaticThingBuf::push_ref`]) methods.
+#[derive(PartialEq, Eq)]
 pub struct Full<T = ()>(T);
 
 /// State variables for the atomic ring buffer algorithm.
@@ -524,6 +528,18 @@ impl<T> Slot<T> {
 
 unsafe impl<T: Sync> Sync for Slot<T> {}
 
+// === impl Full ===
+
+impl<T> Full<T> {
+    /// Unwraps the inner `T` value held by this error.
+    ///
+    /// This method allows recovering the original message when sending to a
+    /// channel has failed.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 impl<T> fmt::Debug for Full<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Full(..)")
@@ -532,6 +548,9 @@ impl<T> fmt::Debug for Full<T> {
 
 impl<T> fmt::Display for Full<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("channel full")
+        f.write_str("queue at capacity")
     }
 }
+
+#[cfg(feature = "std")]
+impl<T> std::error::Error for Full<T> {}
