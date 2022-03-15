@@ -68,6 +68,7 @@ pub struct Ref<'slot, T> {
 ///
 /// This is returned by the [`ThingBuf::push`] and [`ThingBuf::push_ref`] (and
 /// [`StaticThingBuf::push`]/[`StaticThingBuf::push_ref`]) methods.
+#[derive(PartialEq, Eq)]
 pub struct Full<T = ()>(T);
 
 /// State variables for the atomic ring buffer algorithm.
