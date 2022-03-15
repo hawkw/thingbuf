@@ -5,9 +5,10 @@
 
 [![crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
-[![Documentation (`main` branch)][docs-main-badge]][docs-main-url]
+[![Documentation (HEAD)][docs-main-badge]][docs-main-url]
 [![MIT licensed][mit-badge]][mit-url]
-[![Build Status][actions-badge]][actions-url]
+[![Test Status][tests-badge]][tests-url]
+[![Loom Models][loom-badge]][loom-url]
 [![Sponsor @hawkw on GitHub Sponsors][sponsor-badge]][sponsor-url]
 
 [crates-badge]: https://img.shields.io/crates/v/thingbuf.svg
@@ -18,6 +19,10 @@
 [docs-main-url]: https://thingbuf.elizas.website
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: ../LICENSE
+[tests-badge]: https://github.com/hawkw/thingbuf/actions/workflows/tests.yml/badge.svg?branch=main
+[tests-url]: https://github.com/hawkw/thingbuf/actions/workflows/tests.yml
+[loom-badge]: https://github.com/hawkw/thingbuf/actions/workflows/loom.yml/badge.svg?branch=main
+[loom-url]: https://github.com/hawkw/thingbuf/actions/workflows/loom.yml
 [sponsor-badge]: https://img.shields.io/badge/sponsor-%F0%9F%A4%8D-ff69b4
 [sponsor-url]: https://github.com/sponsors/hawkw
 
