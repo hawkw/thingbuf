@@ -3,6 +3,20 @@
 > "I'm at the buffer pool. I'm at the MPSC channel. I'm at the combination MPSC
 > channel and buffer pool."
 
+[![crates.io][crates-badge]][crates-url]
+[![Documentation][docs-badge]][docs-url]
+[![Documentation (`main` branch)][docs-main-badge]][docs-main-url]
+[![MIT licensed][mit-badge]][mit-url]
+[![Build Status][actions-badge]][actions-url]
+
+[crates-badge]: https://img.shields.io/crates/v/thingbuf.svg
+[crates-url]: https://crates.io/crates/thingbuf
+[docs-badge]: https://docs.rs/thingbuf/badge.svg
+[docs-url]: https://docs.rs/thingbuf
+[docs-main-badge]: https://img.shields.io/netlify/f2cde148-79c2-4e3f-ab2b-285dff1b9fdf?label=docs%20%28main%20branch%29
+[docs-main-url]: https://thingbuf.elizas.website
+[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
+[mit-url]: ../LICENSE
 ## What Is It?
 
 `thingbuf` is a lock-free array-based concurrent ring buffer that allows access
