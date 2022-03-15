@@ -207,6 +207,7 @@ impl<T, const CAP: usize> StaticThingBuf<T, CAP> {
     /// This queue will use the [default recycling policy].
     ///
     /// [recycling policy]: crate::recycling::DefaultRecycle
+    #[must_use]
     pub const fn new() -> Self {
         Self::with_recycle(recycling::DefaultRecycle::new())
     }
@@ -217,6 +218,7 @@ impl<T, const CAP: usize, R> StaticThingBuf<T, CAP, R> {
     /// the provided [recycling policy].
     ///
     /// [recycling policy]: crate::recycling::Recycle
+    #[must_use]
     pub const fn with_recycle(recycle: R) -> Self {
         StaticThingBuf {
             core: Core::new(CAP),

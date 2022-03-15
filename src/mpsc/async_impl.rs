@@ -24,6 +24,7 @@ feature! {
     /// This channel will use the [default recycling policy].
     ///
     /// [recycling policy]: crate::recycling::DefaultRecycle
+    #[must_use]
     pub fn channel<T: Default + Clone>(capacity: usize) -> (Sender<T>, Receiver<T>) {
         with_recycle(capacity, recycling::DefaultRecycle::new())
     }
@@ -32,6 +33,7 @@ feature! {
     /// channel with the provided capacity and [recycling policy].
     ///
     /// [recycling policy]: crate::recycling::Recycle
+    #[must_use]
     pub fn with_recycle<T, R: Recycle<T>>(capacity: usize, recycle: R) -> (Sender<T, R>, Receiver<T, R>) {
         assert!(capacity > 0);
         let inner = Arc::new(Inner {
@@ -636,6 +638,7 @@ feature! {
         /// }
         /// ```
         /// [`split`]: StaticChannel::split
+        #[must_use]
         pub const fn new() -> Self {
             Self {
                 core: ChannelCore::new(CAPACITY),
@@ -658,6 +661,7 @@ feature! {
         /// # Panics
         ///
         /// If the channel has already been split.
+        #[must_use]
         pub fn split(&'static self) -> (StaticSender<T, R>, StaticReceiver<T, R>) {
             self.try_split().expect("channel already split")
         }
@@ -668,6 +672,7 @@ feature! {
         /// A static channel can only be split a single time. If
         /// [`StaticChannel::split`] or [`StaticChannel::try_split`] have been
         /// called previously, this method returns `None`.
+        #[must_use]
         pub fn try_split(&'static self) -> Option<(StaticSender<T, R>, StaticReceiver<T, R>)> {
             self.is_split
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)

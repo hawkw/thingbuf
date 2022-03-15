@@ -190,6 +190,7 @@ pub struct ThingBuf<T, R = recycling::DefaultRecycle> {
 
 impl<T: Default + Clone> ThingBuf<T> {
     /// Returns a new `ThingBuf` with space for `capacity` elements.
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self::with_recycle(capacity, recycling::DefaultRecycle::new())
     }
@@ -300,6 +301,7 @@ where
     /// the provided [recycling policy].
     ///
     /// [recycling policy]: crate::recycling::Recycle
+    #[must_use]
     pub fn with_recycle(capacity: usize, recycle: R) -> Self {
         assert!(capacity > 0);
         Self {
