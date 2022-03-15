@@ -14,10 +14,11 @@ mod wait;
 
 pub use self::recycling::Recycle;
 
-#[doc = include_str!("../mpsc_perf_comparison.md")]
-pub mod mpsc_perf_comparison {
-    // Empty module, used only for documentation.
-}
+// TODO(eliza): finish writing this
+// #[doc = include_str!("../mpsc_perf_comparison.md")]
+// pub mod mpsc_perf_comparison {
+//     // Empty module, used only for documentation.
+// }
 
 feature! {
     #![all(feature = "static", not(all(loom, test)))]

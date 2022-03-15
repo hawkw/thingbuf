@@ -14,9 +14,8 @@ the ring buffer.
 
 - **If you want a high-throughput bounded MPSC channel** that allocates only on
   channel creation. Some MPSC channels have good throughput. Some other MPSC
-  channels won't allocate memory per-waiter. [`thingbuf::mpsc`] has both. See
-  [here](../mpsc_perf_comparison) for a detailed performance comparison of MPSC
-  channels. [`thingbuf::mpsc`] is a competitive choice for a general-purpose
+  channels won't allocate memory per-waiter. [`thingbuf::mpsc`] has both.
+  [`thingbuf::mpsc`] is a competitive choice for a general-purpose
   MPSC channel in most use cases.
 
   Both [asynchronous][`thingbuf::mpsc`] and [blocking][`thingbuf::mpsc::sync`]
