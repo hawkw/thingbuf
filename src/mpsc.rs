@@ -89,6 +89,9 @@ impl<T> fmt::Display for Closed<T> {
     }
 }
 
+#[cfg(feature = "std")]
+impl<T> std::error::Error for Closed<T> {}
+
 // === impl TrySendError ===
 
 impl TrySendError {
@@ -145,6 +148,9 @@ impl<T> fmt::Display for TrySendError<T> {
         })
     }
 }
+
+#[cfg(feature = "std")]
+impl<T> std::error::Error for TrySendError<T> {}
 
 // ==== impl Inner ====
 
