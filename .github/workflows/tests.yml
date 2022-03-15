@@ -44,12 +44,14 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --features static
+          args: --all-features
       - name: Run cargo test (no static APIs)
         if: ${{ matrix.rust == env.msrv }}
         uses: actions-rs/cargo@v1
         with:
           command: test
+          # skip doctests, which require all features to be enabled
+          args: --lib --tests
 
   benches:
     name: Compile benchmarks
