@@ -145,16 +145,16 @@ async fn static_async_channel() {
 }
 
 #[test]
-fn static_sync_channel() {
+fn static_blocking_channel() {
     use std::collections::HashSet;
-    use thingbuf::mpsc::sync;
+    use thingbuf::mpsc::blocking;
 
     const N_PRODUCERS: usize = 8;
     const N_SENDS: usize = N_PRODUCERS * 2;
 
-    static CHANNEL: sync::StaticChannel<usize, N_PRODUCERS> = sync::StaticChannel::new();
+    static CHANNEL: blocking::StaticChannel<usize, N_PRODUCERS> = blocking::StaticChannel::new();
 
-    fn do_producer(tx: sync::StaticSender<usize>, n: usize) -> impl FnOnce() {
+    fn do_producer(tx: blocking::StaticSender<usize>, n: usize) -> impl FnOnce() {
         move || {
             let tag = n * N_SENDS;
             for i in 0..N_SENDS {
