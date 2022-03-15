@@ -9,8 +9,15 @@ name = "thingbuf"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.57.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+author = "Eliza Weisman <eliza@buoyant.io>"
+repository = "https://github.com/hawkw/thingbuf"
+homepage = "https://github.com/hawkw/thingbuf"
+description = """
+I'm at the buffer pool. I'm at the MPSC channel. I'm at the combination MPSC channel and buffer pool.
+"""
+keywords = ["lock-free", "queue", "channel", "mpsc", "pool"]
+categories = ["asynchronous", "concurrency", "data-structures", "no-std"]
+exclude = ["/.github", "/.cargo", "/bin", "/bench", "/assets"]
 
 [features]
 std = ["alloc", "parking_lot"]
@@ -20,7 +27,7 @@ static = []
 
 [dependencies]
 pin-project = "1"
-parking_lot = { version = "0.11", optional = true, default-features = false }
+parking_lot = { version = "0.12", optional = true, default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1.14.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }

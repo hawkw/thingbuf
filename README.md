@@ -3,6 +3,29 @@
 > "I'm at the buffer pool. I'm at the MPSC channel. I'm at the combination MPSC
 > channel and buffer pool."
 
+[![crates.io][crates-badge]][crates-url]
+[![Documentation][docs-badge]][docs-url]
+[![Documentation (HEAD)][docs-main-badge]][docs-main-url]
+[![MIT licensed][mit-badge]][mit-url]
+[![Test Status][tests-badge]][tests-url]
+[![Loom Models][loom-badge]][loom-url]
+[![Sponsor @hawkw on GitHub Sponsors][sponsor-badge]][sponsor-url]
+
+[crates-badge]: https://img.shields.io/crates/v/thingbuf.svg
+[crates-url]: https://crates.io/crates/thingbuf
+[docs-badge]: https://docs.rs/thingbuf/badge.svg
+[docs-url]: https://docs.rs/thingbuf
+[docs-main-badge]: https://img.shields.io/netlify/f2cde148-79c2-4e3f-ab2b-285dff1b9fdf?label=docs%20%28main%20branch%29
+[docs-main-url]: https://thingbuf.elizas.website
+[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
+[mit-url]: ../LICENSE
+[tests-badge]: https://github.com/hawkw/thingbuf/actions/workflows/tests.yml/badge.svg?branch=main
+[tests-url]: https://github.com/hawkw/thingbuf/actions/workflows/tests.yml
+[loom-badge]: https://github.com/hawkw/thingbuf/actions/workflows/loom.yml/badge.svg?branch=main
+[loom-url]: https://github.com/hawkw/thingbuf/actions/workflows/loom.yml
+[sponsor-badge]: https://img.shields.io/badge/sponsor-%F0%9F%A4%8D-ff69b4
+[sponsor-url]: https://github.com/sponsors/hawkw
+
 ## What Is It?
 
 `thingbuf` is a lock-free array-based concurrent ring buffer that allows access
