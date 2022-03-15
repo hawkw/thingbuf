@@ -78,30 +78,28 @@
 //! An asynchronous channel is used with asynchronous tasks:
 //!
 //! ```rust
-//! # async fn example() {
-//! # mod tokio {
-//! # pub fn spawn(_: impl std::future::Future) {}
-//! # }
 //! use thingbuf::mpsc;
 //!
-//! let (tx, rx) = mpsc::channel(8);
+//! #[tokio::main]
+//! async fn main() {
+//!     let (tx, rx) = mpsc::channel(8);
 //!
-//! // Spawn some tasks that write to the channel:
-//! for i in 0..10 {
-//!     let tx = tx.clone();
-//!     tokio::spawn(async move {
-//!         tx.send(i).await.unwrap();
-//!     });
+//!     // Spawn some tasks that write to the channel:
+//!     for i in 0..10 {
+//!         let tx = tx.clone();
+//!         tokio::spawn(async move {
+//!             tx.send(i).await.unwrap();
+//!         });
+//!     }
+//!
+//!     // Print out every message recieved from the channel:
+//!     for _ in 0..10 {
+//!         let j = rx.recv().await.unwrap();
+//!
+//!         println!("received {}", j);
+//!         assert!(0 <= j && j < 10);
+//!     }
 //! }
-//!
-//! // Print out every message recieved from the channel:
-//! for _ in 0..10 {
-//!     let j = rx.recv().await.unwrap();
-//!
-//!     println!("received {}", j);
-//!     assert!(0 <= j && j < 10);
-//! }
-//! # }
 //! ```
 //!
 //! A blocking channel is used with threads:
