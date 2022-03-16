@@ -426,7 +426,7 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     false
                 }
             }
-            weird => unreachable!("notify_slow: unexpected state value {:?}", weird),
+            _ => false,
         }
     }
 

@@ -310,6 +310,10 @@ impl<N> ChannelCore<N> {
             tx_wait: WaitQueue::new(),
         }
     }
+
+    fn remaining_capacity(&self) -> usize {
+        self.core.capacity - self.core.len()
+    }
 }
 
 impl<N> ChannelCore<N>
@@ -337,7 +341,13 @@ where
     where
         R: Recycle<T>,
     {
-        self.core.push_ref(slots, recycle).map(|slot| SendRefInner {
+        let slot = self.core.push_ref(slots, recycle)?;
+        // if we claimed a slot, and there is still capacity remaining, notify
+        // another sender
+        if test_dbg!(self.remaining_capacity()) > 0 {
+            test_dbg!(self.tx_wait.notify());
+        }
+        Ok(SendRefInner {
             _notify: NotifyRx(&self.rx_wait),
             slot,
         })
