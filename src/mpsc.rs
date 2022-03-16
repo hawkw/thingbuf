@@ -252,7 +252,7 @@ use crate::{
     wait::{Notify, WaitCell, WaitQueue, WaitResult},
     Core, Ref, Slot,
 };
-use core::{fmt, ops::Index, task::Poll};
+use core::{fmt, task::Poll};
 
 pub mod errors;
 use self::errors::TrySendError;
@@ -361,14 +361,11 @@ where
     /// The loop itself has to be written in the actual `send` method's
     /// implementation, rather than on `inner`, because it might be async and
     /// may yield, or might park the thread.
-    fn poll_recv_ref<'a, T, S>(
+    fn poll_recv_ref<'a, T>(
         &'a self,
-        slots: &'a S,
+        slots: &'a [Slot<T>],
         mk_waiter: impl Fn() -> N,
-    ) -> Poll<Option<Ref<'a, T>>>
-    where
-        S: Index<usize, Output = Slot<T>> + ?Sized,
-    {
+    ) -> Poll<Option<Ref<'a, T>>> {
         macro_rules! try_poll_recv {
             () => {
                 // If we got a value, return it!
