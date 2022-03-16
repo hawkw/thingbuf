@@ -42,7 +42,7 @@ the ring buffer.
   MPSC channel in most use cases.
 
   Both [asynchronous][`thingbuf::mpsc`] and [blocking][`thingbuf::mpsc::sync`]
-  MPSC channels are available[^blocking-std], so `thingbuf` can be used in place
+  MPSC channels are available, so `thingbuf` can be used in place
   of asynchronous channels like [`futures::channel::mpsc`] *and* blocking
   channels like [`std::sync::mpsc::sync_channel`].
 
@@ -149,16 +149,17 @@ thingbuf = { version = "0.1", default-features = false, features = ["alloc"] }
 
 ### Crate Feature Flags
 
-- **std**: Enables features that require the Rust standard library, such as
+- **std** (_Enabled by default_): Enables features that require the Rust
+  standard library, such as
   synchronous (blocking) channels. This implicitly enables the "alloc" feature
-  flag. _Enabled by default_.
+  flag.
 - **alloc**: Enables features that require `liballoc` (but not `libstd`). This
   enables `thingbuf` queues and asynchronous channels where the size of the
   channel is determined at runtime.
-- **static**: Enables the static (const-generic-based) `thingbuf` queues and
-  channels. These can be used without dynamic memory allocation when the size of
-  a queue or channel is known at compile-time. _Disabled by default (requires
-  Rust 1.60 or newer)_.
+- **static** (_Disabled by default, requires Rust 1.59+_): Enables the static
+  (const-generic-based) `thingbuf` queues and channels. These can be used
+  without dynamic memory allocation when the size of a queue or channel is known
+  at compile-time.
 
 ### Compiler Support
 
@@ -184,10 +185,6 @@ feature flag requries Rust 1.60+.
 
   **A:** Extremely.
 
-- **Q: Is it wait-free?**
-
-  **A:** As long as you don't use the APIs that wait :)
-
 - **Q: Why is there only a bounded variant?**
 
   **A:** Because unbounded queues are of the Devil.
@@ -212,6 +209,3 @@ feature flag requries Rust 1.60+.
 [`tokio::sync::mpsc`]: https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html
 [`tracing`]: https://crates.io/crates/tracing
 [`crossbeam-channel`]: https://crates.io/crates/crossbeam-channel
-
-[^blocking-std]: The synchronous (blocking) channel naturally requires `std` in
-order to park threads.
