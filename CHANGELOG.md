@@ -1,3 +1,18 @@
+<a name="v0.1.1"></a>
+### v0.1.1 (2022-03-16)
+
+
+#### Performance
+
+*   elide bounds checks when indexing (#51) ([27ea0ec4](https://github.com/hawkw/thingbuf/commit/27ea0ec45abb45049b8009a253270d5ed658fb38))
+* **mpsc:**  remove panics from wait queue (#50) ([f61993f0](https://github.com/hawkw/thingbuf/commit/f61993f0e5f7e8725168b1c12d9249c979a986d3))
+
+#### Bug Fixes
+
+* **mpsc:**  compilation error on macOS (#53) ([d0d0cd90](https://github.com/hawkw/thingbuf/commit/d0d0cd904e900f099c985b0b9340af681f8c881b), closes [#54](https://github.com/hawkw/thingbuf/issues/54))
+
+
+
 <a name="0.1.0"></a>
 ## 0.1.0 (2022-03-15)
 
