@@ -34,5 +34,9 @@ name = "async_mpsc"
 harness = false
 
 [[bench]]
+name = "async_mpsc_nowait"
+harness = false
+
+[[bench]]
 name = "async_spsc"
 harness = false
