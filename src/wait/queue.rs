@@ -403,11 +403,14 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                     debug_assert!(actual == EMPTY || actual == WAKING);
                     self.state.store(WAKING, SeqCst);
                 }
-                false
             }
             WAITING => {
                 let waiter = list.dequeue(WAKING);
-                debug_assert!(waiter.is_some(), "if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}", self);
+                debug_assert!(
+                    waiter.is_some(),
+                    "if we were in the `WAITING` state, there must be a waiter in the queue!\nself={:#?}",
+                    self,
+                );
 
                 // If we popped the last node, transition back to the empty
                 // state.
@@ -421,13 +424,17 @@ impl<T: Notify + Unpin> WaitQueue<T> {
                 // wake the waiter
                 if let Some(waiter) = waiter {
                     waiter.notify();
-                    true
-                } else {
-                    false
+                    return true;
                 }
             }
-            weird => unreachable!("notify_slow: unexpected state value {:?}", weird),
+            _weird => {
+                // huh, if `notify_slow` was called, we *probably* shouldn't be
+                // in the `closed` state...
+                #[cfg(debug_assertions)]
+                unreachable!("notify_slow: unexpected state value {:?}", _weird);
+            }
         }
+        false
     }
 
     /// Close the queue, notifying all waiting tasks.
