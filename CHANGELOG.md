@@ -15,7 +15,10 @@ Initial release!
 *   add `Deref` and `DerefMut` impls to `Ref` types (#13) ([6ebfe7b8](https://github.com/hawkw/thingbuf/commit/6ebfe7b8fd4641cdb72566a51a1e99f737888283), breaks [#](https://github.com/hawkw/thingbuf/issues/))
 *   add nicer `fmt::Debug` impls (#4) ([38cbad20](https://github.com/hawkw/thingbuf/commit/38cbad20265c4ec3fd6b9bd715a1e6e36a03e72e))
 * **StringBuf:**  add `StringBuf`  type ([856c1f6c](https://github.com/hawkw/thingbuf/commit/856c1f6c93f53ad3566e76b6edc33217c451791b))
-* **ThingBuf:**  add `pop_with` and `push_with` ([9192c603](https://github.com/hawkw/thingbuf/commit/9192c603855e0099310a8228afa9b9475df5930b))
+* **ThingBuf:**
+  *  add `pop_with` and `push_with` ([9192c603](https://github.com/hawkw/thingbuf/commit/9192c603855e0099310a8228afa9b9475df5930b))
+  *  add `no_std` compatible `StaticThingBuf` (#1) ([3b23f858](https://github.com/hawkw/thingbuf/commit/3b23f8583b3f9c91d2f883f26b0ff454fabe00cf))
+  *  hahahaha static storage works ([e47cd7dc](https://github.com/hawkw/thingbuf/commit/e47cd7dc80990ec4aadabe5aab229d4195254f6e))
 * **mpsc:**
   *  stick errors in their own module ([3137b85e](https://github.com/hawkw/thingbuf/commit/3137b85e0dbfe9716d29b45efc41443046e726bd))
   *  add `std::error::Error` impls ([d5ac083b](https://github.com/hawkw/thingbuf/commit/d5ac083b15ef70d7d51e74ad1eaa3ca534e8a153))
@@ -25,9 +28,6 @@ Initial release!
   *  make errors more like other mpscs (#5) ([5e749ccc](https://github.com/hawkw/thingbuf/commit/5e749ccc91140063d9287dccd36312f110c42836))
   *  initial sync and async channel APIs (#2) ([1c28c84f](https://github.com/hawkw/thingbuf/commit/1c28c84fdc9ffb895799b51fd82beb33783f7b6a))
 * **recycling:**  add customizable recycling policies (#33) ([54e53534](https://github.com/hawkw/thingbuf/commit/54e53534303606d734cb7490cf782d7b71fb8103), closes [#30](https://github.com/hawkw/thingbuf/issues/30))
-* **thingbuf:**
-  *  add `no_std` compatible `StaticThingBuf` (#1) ([3b23f858](https://github.com/hawkw/thingbuf/commit/3b23f8583b3f9c91d2f883f26b0ff454fabe00cf))
-  *  hahahaha static storage works ([e47cd7dc](https://github.com/hawkw/thingbuf/commit/e47cd7dc80990ec4aadabe5aab229d4195254f6e))
 
 #### Breaking Changes
 
