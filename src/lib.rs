@@ -174,14 +174,13 @@ impl Core {
     }
 
     #[inline(always)]
-    fn push_ref<'slots, T, S, R>(
+    fn push_ref<'slots, T, R>(
         &self,
-        slots: &'slots S,
+        slots: &'slots [Slot<T>],
         recycle: &R,
     ) -> Result<Ref<'slots, T>, TrySendError<()>>
     where
         R: Recycle<T>,
-        S: ops::Index<usize, Output = Slot<T>> + ?Sized,
     {
         test_println!("push_ref");
         let mut backoff = Backoff::new();
@@ -194,7 +193,23 @@ impl Core {
             let (idx, gen) = self.idx_gen(tail);
             test_dbg!(idx);
             test_dbg!(gen);
-            let slot = &slots[idx];
+            let slot = unsafe {
+                // Safety: `get_unchecked` does not check that the accessed
+                // index was within bounds. However, `idx` is produced by
+                // masking the current tail index to extract only the part
+                // that's within the array's bounds.
+                debug_assert!(
+                    idx < slots.len(),
+                    "index out of bounds (index was {} but the length was {})\n\n\
+                    /!\\ EXTREMELY SERIOUS WARNING /!\\: in release mode, this \
+                    access would not have been bounds checked, resulting in \
+                    undefined behavior!\nthis is a bug in `thingbuf`! please \
+                    report an issue immediately!",
+                    idx,
+                    slots.len()
+                );
+                slots.get_unchecked(idx)
+            };
             let state = test_dbg!(slot.state.load(Acquire));
 
             if test_dbg!(state == tail) {
@@ -266,10 +281,7 @@ impl Core {
     }
 
     #[inline(always)]
-    fn pop_ref<'slots, T, S>(&self, slots: &'slots S) -> Result<Ref<'slots, T>, TrySendError>
-    where
-        S: ops::Index<usize, Output = Slot<T>> + ?Sized,
-    {
+    fn pop_ref<'slots, T>(&self, slots: &'slots [Slot<T>]) -> Result<Ref<'slots, T>, TrySendError> {
         test_println!("pop_ref");
         let mut backoff = Backoff::new();
         let mut head = self.head.load(Relaxed);
@@ -279,7 +291,23 @@ impl Core {
             let (idx, gen) = self.idx_gen(head);
             test_dbg!(idx);
             test_dbg!(gen);
-            let slot = &slots[idx];
+            let slot = unsafe {
+                // Safety: `get_unchecked` does not check that the accessed
+                // index was within bounds. However, `idx` is produced by
+                // masking the current head index to extract only the part
+                // that's within the array's bounds.
+                debug_assert!(
+                    idx < slots.len(),
+                    "index out of bounds (index was {} but the length was {})\n\n\
+                    /!\\ EXTREMELY SERIOUS WARNING /!\\: in release mode, this \
+                    access would not have been bounds checked, resulting in \
+                    undefined behavior!\nthis is a bug in `thingbuf`! please \
+                    report an issue immediately!",
+                    idx,
+                    slots.len()
+                );
+                slots.get_unchecked(idx)
+            };
             let state = test_dbg!(slot.state.load(Acquire));
 
             // If the slot's state is ahead of the head index by one, we can pop
