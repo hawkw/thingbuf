@@ -23,13 +23,18 @@ jobs:
 
   tests:
     name: Tests
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust:
-          - stable
-          - nightly
-          - 1.57.0
+        # test all Rust versions on Ubuntu
+        rust: [stable, 1.57.0]
+        os: [ubuntu-latest, m]
+        # test stable Rust on Windows and MacOS as well
+        include:
+          - rust: stable
+            os: windows-latest
+          - rust: stable
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
       - name: Install toolchain

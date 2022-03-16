@@ -99,7 +99,10 @@ impl<T: Notify> WaitCell<T> {
         let result = match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING, AcqRel))
         {
             Ok(_) => {
-                let _ = panic::catch_unwind(move || drop(prev_waiter));
+                // XXX(eliza): it's kind of sad we have to use
+                // `AssertUnwindSafe` here, because `std::thread::Thread`
+                // contains a `Condvar` on macOS :(
+                let _ = panic::catch_unwind(panic::AssertUnwindSafe(move || drop(prev_waiter)));
 
                 WaitResult::Wait
             }
@@ -117,9 +120,11 @@ impl<T: Notify> WaitCell<T> {
                 );
 
                 if let Some(prev_waiter) = prev_waiter {
-                    let _ = panic::catch_unwind(move || {
+                    // XXX(eliza): similarly, it's necessary to assert unwind
+                    // safety due to `std::thread::Thread` on macOS here...
+                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(move || {
                         prev_waiter.notify();
-                    });
+                    }));
                 }
 
                 if let Some(waiter) = waiter {
