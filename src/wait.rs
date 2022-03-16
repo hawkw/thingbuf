@@ -19,7 +19,6 @@
 //! [`core::task::Waker`]s, for the async MPSC, or [`std::thread::Thread`]s, for
 //! the blocking MPSC. In either case, the role played by these types is fairly
 //! analogous.
-use crate::util::panic::UnwindSafe;
 use core::{fmt, task::Waker};
 
 mod cell;
@@ -54,7 +53,7 @@ pub(crate) enum WaitResult {
     Notified,
 }
 
-pub(crate) trait Notify: UnwindSafe + fmt::Debug + Clone {
+pub(crate) trait Notify: fmt::Debug + Clone {
     fn notify(self);
 
     fn same(&self, other: &Self) -> bool;
