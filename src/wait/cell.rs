@@ -31,6 +31,8 @@ use core::{fmt, ops};
 ///   in `ThingBuf`...
 ///
 /// [`AtomicWaker`]: https://github.com/tokio-rs/tokio/blob/09b770c5db31a1f35631600e1d239679354da2dd/tokio/src/sync/task/atomic_waker.rs
+/// [`Waker`]: core::task::Waker
+/// [`Thread`]: std::thread::Thread
 pub(crate) struct WaitCell<T> {
     lock: CachePadded<AtomicUsize>,
     waiter: UnsafeCell<Option<T>>,

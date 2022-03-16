@@ -9,7 +9,7 @@ use crate::{
 
 use core::{fmt, marker::PhantomPinned, pin::Pin, ptr::NonNull};
 
-/// A queue of waiters ([`core::task::Waker`]s or [`std;:thread::Thread`]s)
+/// A queue of waiters ([`core::task::Waker`]s or [`std::thread::Thread`]s)
 /// implemented as a doubly-linked intrusive list.
 ///
 /// The *[intrusive]* aspect of this list is important, as it means that it does
@@ -53,6 +53,7 @@ use core::{fmt, marker::PhantomPinned, pin::Pin, ptr::NonNull};
 ///
 /// A spinlock is used on `no_std` platforms; [`std::sync::Mutex`] is used when
 /// the standard library is available.
+///
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
@@ -61,24 +62,25 @@ pub(crate) struct WaitQueue<T> {
     ///
     /// The queue is always in one of the following states:
     ///
-    /// - `EMPTY`: No waiters are queued, and there is no pending notification.
+    /// - [`EMPTY`]: No waiters are queued, and there is no pending notification.
     ///   Waiting while the queue is in this state will enqueue the waiter;
     ///   notifying while in this state will store a pending notification in the
     ///   queue, transitioning to the `WAKING` state.
     ///
-    /// - `WAITING`: There are one or more waiters in the queue. Waiting while
+    /// - [`WAITING`]: There are one or more waiters in the queue. Waiting while
     ///   the queue is in this state will not transition the state. Waking while
     ///   in this state will wake the first waiter in the queue; if this empties
     ///   the queue, then the queue will transition to the `EMPTY` state.
     ///
-    /// - `WAKING`: The queue has a stored notification. Waiting while the queue
+    /// - [`WAKING`]: The queue has a stored notification. Waiting while the queue
     ///   is in this state will consume the pending notification *without*
     ///   enqueueing the waiter and transition the queue to the `EMPTY` state.
     ///   Waking while in this state will leave the queue in this state.
     ///
-    /// - `CLOSED`: The queue is closed. Waiting while in this state will return
+    /// - [`CLOSED`]: The queue is closed. Waiting while in this state will return
     ///   [`WaitResult::Closed`] without transitioning the queue's state.
     state: CachePadded<AtomicUsize>,
+
     /// The linked list of waiters.
     ///
     /// # Safety
@@ -104,17 +106,17 @@ pub(crate) struct Waiter<T> {
     ///
     /// A waiter is always in one of the following states:
     ///
-    /// - `EMPTY`: The waiter is not linked in the queue, and does not have a
+    /// - [`EMPTY`]: The waiter is not linked in the queue, and does not have a
     ///   `Thread`/`Waker`.
     ///
-    /// - `WAITING`: The waiter is linked in the queue and has a
+    /// - [`WAITING`]: The waiter is linked in the queue and has a
     ///   `Thread`/`Waker`.
     ///
-    /// - `WAKING`: The waiter has been notified by the wait queue. If it is in
+    /// - [`WAKING`]: The waiter has been notified by the wait queue. If it is in
     ///   this state, it is *not* linked into the queue, and does not have a
     ///   `Thread`/`Waker`.
     ///
-    /// - `WAKING`: The waiter has been notified because the wait queue closed.
+    /// - [`WAKING`]: The waiter has been notified because the wait queue closed.
     ///   If it is in this state, it is *not* linked into the queue, and does
     ///   not have a `Thread`/`Waker`.
     ///
