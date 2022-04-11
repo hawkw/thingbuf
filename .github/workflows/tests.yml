@@ -21,7 +21,10 @@ env:
 name: Tests
 jobs:
   build_no_std:
-    name: cargo check (no-std)
+    name: Check no_std
+    strategy:
+      matrix:
+        feature: [alloc, static]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -35,7 +38,7 @@ jobs:
     - uses: actions-rs/cargo@v1
       with:
         command: check
-        args: --no-default-features --features alloc
+        args: --no-default-features --features ${{ matrix.feature }}
 
   tests:
     name: Tests
