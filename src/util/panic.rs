@@ -21,7 +21,7 @@ mod inner {
         Ok(f())
     }
 
-    pub(crate) fn resume_unwind(payload: ()) -> ! {
+    pub(crate) fn resume_unwind(_: ()) -> ! {
         unreachable_unchecked!("code compiled with no_std cannot unwind!")
     }
 }

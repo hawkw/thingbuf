@@ -167,7 +167,7 @@ impl Core {
 
     fn close(&self) -> bool {
         test_println!("Core::close");
-        if std::thread::panicking() {
+        if crate::util::panic::panicking() {
             return false;
         }
         test_dbg!(self.tail.fetch_or(self.closed, SeqCst) & self.closed == 0)
@@ -516,7 +516,7 @@ unsafe impl<T: Send> Sync for Ref<'_, T> {}
 
 impl<T> Slot<T> {
     #[cfg(feature = "alloc")]
-    pub(crate) fn make_boxed_array(capacity: usize) -> Box<[Self]> {
+    pub(crate) fn make_boxed_array(capacity: usize) -> alloc::boxed::Box<[Self]> {
         (0..capacity).map(|i| Slot::new(i)).collect()
     }
 
