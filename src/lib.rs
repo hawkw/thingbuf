@@ -516,7 +516,7 @@ unsafe impl<T: Send> Sync for Ref<'_, T> {}
 
 impl<T> Slot<T> {
     #[cfg(feature = "alloc")]
-    pub(crate) fn make_boxed_array(capacity: usize) -> Box<[Self]> {
+    pub(crate) fn make_boxed_array(capacity: usize) -> alloc::boxed::Box<[Self]> {
         (0..capacity).map(|i| Slot::new(i)).collect()
     }
 

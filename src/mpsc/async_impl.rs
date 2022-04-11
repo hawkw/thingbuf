@@ -17,6 +17,7 @@ feature! {
     #![feature = "alloc"]
 
     use crate::loom::sync::Arc;
+    use alloc::boxed::Box;
 
     /// Returns a new asynchronous multi-producer, single consumer (MPSC)
     /// channel with the provided capacity.
