@@ -28,6 +28,7 @@ pub(crate) const fn const_mutex<T>(data: T) -> Mutex<T> {
 }
 
 impl<T> Mutex<T> {
+    #[cfg(loom)]
     pub(crate) fn new(data: T) -> Self {
         Self {
             locked: AtomicBool::new(false),
