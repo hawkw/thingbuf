@@ -167,7 +167,7 @@ impl Core {
 
     fn close(&self) -> bool {
         test_println!("Core::close");
-        if std::thread::panicking() {
+        if crate::util::panic::panicking() {
             return false;
         }
         test_dbg!(self.tail.fetch_or(self.closed, SeqCst) & self.closed == 0)
