@@ -33,9 +33,9 @@ jobs:
         override: true
         components: rustfmt
       uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --no-default-features --features alloc
+      with:
+        command: check
+        args: --no-default-features --features alloc
 
   tests:
     name: Tests
