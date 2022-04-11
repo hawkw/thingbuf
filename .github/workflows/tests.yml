@@ -22,7 +22,7 @@ name: Tests
 jobs:
   build_no_std:
     name: cargo check (no-std)
-    runs_on: ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
     - name: Install toolchain
