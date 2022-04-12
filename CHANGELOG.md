@@ -1,3 +1,13 @@
+<a name="v0.1.2"></a>
+### v0.1.2 (2022-04-12)
+
+
+#### Bug Fixes
+
+*   compilation errors with `--no-default-features` (#59) ([a2ab1788](https://github.com/hawkw/thingbuf/commit/a2ab17880e273c5fcde9e1d6ca77978402839d79), closes [#58](https://github.com/hawkw/thingbuf/issues/58))
+
+
+
 <a name="v0.1.1"></a>
 ### v0.1.1 (2022-03-16)
 
