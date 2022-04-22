@@ -422,6 +422,76 @@ feature! {
             }
         }
 
+        /// Attempts to receive the next message for this receiver by reference
+        /// without blocking.
+        ///
+        /// This method differs from [`recv_ref`] by returning immediately if the
+        /// channel is empty or closed.
+        ///
+        /// # Errors
+        ///
+        /// This method returns an error when the channel is closed or there are
+        /// no remaining messages in the channel's buffer.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{channel, errors::TryRecvError};
+        /// use std::{thread, fmt::Write};
+        ///
+        /// let (tx, rx) = channel(100);
+        /// assert!(matches!(rx.try_recv_ref(), Err(TryRecvError::Empty)));
+        ///
+        /// tx.try_send(1).unwrap();
+        /// drop(tx);
+        ///
+        /// assert_eq!(*rx.try_recv_ref().unwrap(), 1);
+        /// assert!(matches!(rx.try_recv_ref(), Err(TryRecvError::Closed)));
+        /// ```
+        ///
+        /// [`recv_ref`]: Self::recv_ref
+        pub fn try_recv_ref(&self) -> Result<Ref<'_, T>, TryRecvError>
+        where
+            R: Recycle<T>,
+        {
+            self.inner.core.try_recv_ref(self.inner.slots.as_ref())
+        }
+
+        /// Attempts to receive the next message for this receiver by reference
+        /// without blocking.
+        ///
+        /// This method differs from [`recv`] by returning immediately if the
+        /// channel is empty or closed.
+        ///
+        /// # Errors
+        ///
+        /// This method returns an error when the channel is closed or there are
+        /// no remaining messages in the channel's buffer.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{channel, errors::TryRecvError};
+        /// use std::{thread, fmt::Write};
+        ///
+        /// let (tx, rx) = channel(100);
+        /// assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+        ///
+        /// tx.try_send(1).unwrap();
+        /// drop(tx);
+        ///
+        /// assert_eq!(rx.try_recv().unwrap(), 1);
+        /// assert_eq!(rx.try_recv(), Err(TryRecvError::Closed));
+        /// ```
+        ///
+        /// [`recv`]: Self::recv
+        pub fn try_recv(&self) -> Result<T, TryRecvError>
+        where
+            R: Recycle<T>,
+        {
+            self.inner.core.try_recv(self.inner.slots.as_ref(), &self.inner.recycle)
+        }
+
         /// Attempts to receive a message *by reference* from this channel,
         /// registering the current task for wakeup if the a message is not yet
         /// available, and returning `None` if the channel has closed and all
@@ -1057,6 +1127,20 @@ feature! {
                 slots: self.slots,
                 recycle: self.recycle,
             }
+        }
+
+        pub fn try_recv_ref(&self) -> Result<Ref<'_, T>, TryRecvError>
+        where
+            R: Recycle<T>,
+        {
+            self.core.try_recv_ref(self.slots.as_ref())
+        }
+
+        pub fn try_recv(&self) -> Result<T, TryRecvError>
+        where
+            R: Recycle<T>,
+        {
+            self.core.try_recv(self.slots.as_ref(), self.recycle)
         }
 
         /// Attempts to receive a message *by reference* from this channel,

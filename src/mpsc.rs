@@ -248,14 +248,14 @@
 //! [blocking sender]: blocking::Sender
 use crate::{
     loom::{atomic::AtomicUsize, hint},
-    recycling::Recycle,
+    recycling::{take, Recycle},
     wait::{Notify, WaitCell, WaitQueue, WaitResult},
     Core, Ref, Slot,
 };
 use core::{fmt, task::Poll};
 
 pub mod errors;
-use self::errors::TrySendError;
+use self::errors::{TryRecvError, TrySendError};
 
 #[derive(Debug)]
 struct ChannelCore<N> {
@@ -353,6 +353,24 @@ where
                 Ok(())
             }
             Err(e) => Err(e.with_value(val)),
+        }
+    }
+
+    fn try_recv_ref<'a, T>(&'a self, slots: &'a [Slot<T>]) -> Result<Ref<'a, T>, TryRecvError> {
+        match self.core.pop_ref(slots) {
+            Ok(slot) => Ok(slot),
+            Err(TrySendError::Closed(_)) => Err(TryRecvError::Closed),
+            Err(_) => Err(TryRecvError::Empty),
+        }
+    }
+
+    fn try_recv<T, R>(&self, slots: &[Slot<T>], recycle: &R) -> Result<T, TryRecvError>
+    where
+        R: Recycle<T>,
+    {
+        match self.try_recv_ref(slots) {
+            Ok(mut slot) => Ok(take(&mut *slot, recycle)),
+            Err(e) => Err(e),
         }
     }
 

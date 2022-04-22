@@ -21,6 +21,19 @@ pub enum TrySendError<T = ()> {
     Closed(T),
 }
 
+/// Error returned by the [`Receiver::recv`] and [`Receiver::recv_ref`] methods.
+///
+/// [`Receiver::recv`]: super::Receiver::recv
+/// [`Receiver::recv_ref`]: super::Receiver::recv_ref
+#[non_exhaustive]
+#[derive(Debug, PartialEq, Eq)]
+pub enum TryRecvError {
+    /// The channel is empty.
+    Empty,
+    /// The channel is closed.
+    Closed,
+}
+
 /// Error returned by [`Sender::send`] or [`Sender::send_ref`] (and
 /// [`StaticSender::send`]/[`StaticSender::send_ref`]), if the
 /// [`Receiver`] half of the channel has been dropped.
