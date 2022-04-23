@@ -423,7 +423,7 @@ feature! {
         }
 
         /// Attempts to receive the next message for this receiver by reference
-        /// without blocking.
+        /// without waiting for a new message when the channel is empty.
         ///
         /// This method differs from [`recv_ref`] by returning immediately if the
         /// channel is empty or closed.
@@ -437,7 +437,6 @@ feature! {
         ///
         /// ```
         /// use thingbuf::mpsc::{channel, errors::TryRecvError};
-        /// use std::{thread, fmt::Write};
         ///
         /// let (tx, rx) = channel(100);
         /// assert!(matches!(rx.try_recv_ref(), Err(TryRecvError::Empty)));
@@ -458,7 +457,7 @@ feature! {
         }
 
         /// Attempts to receive the next message for this receiver by reference
-        /// without blocking.
+        /// without waiting for a new message when the channel is empty.
         ///
         /// This method differs from [`recv`] by returning immediately if the
         /// channel is empty or closed.
@@ -472,7 +471,6 @@ feature! {
         ///
         /// ```
         /// use thingbuf::mpsc::{channel, errors::TryRecvError};
-        /// use std::{thread, fmt::Write};
         ///
         /// let (tx, rx) = channel(100);
         /// assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
@@ -1129,6 +1127,33 @@ feature! {
             }
         }
 
+        /// Attempts to receive the next message for this receiver by reference
+        /// without waiting for a new message when the channel is empty.
+        ///
+        /// This method differs from [`recv_ref`] by returning immediately if the
+        /// channel is empty or closed.
+        ///
+        /// # Errors
+        ///
+        /// This method returns an error when the channel is closed or there are
+        /// no remaining messages in the channel's buffer.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{channel, errors::TryRecvError};
+        ///
+        /// let (tx, rx) = channel(100);
+        /// assert!(matches!(rx.try_recv_ref(), Err(TryRecvError::Empty)));
+        ///
+        /// tx.try_send(1).unwrap();
+        /// drop(tx);
+        ///
+        /// assert_eq!(*rx.try_recv_ref().unwrap(), 1);
+        /// assert!(matches!(rx.try_recv_ref(), Err(TryRecvError::Closed)));
+        /// ```
+        ///
+        /// [`recv_ref`]: Self::recv_ref
         pub fn try_recv_ref(&self) -> Result<Ref<'_, T>, TryRecvError>
         where
             R: Recycle<T>,
@@ -1136,6 +1161,33 @@ feature! {
             self.core.try_recv_ref(self.slots.as_ref())
         }
 
+        /// Attempts to receive the next message for this receiver by reference
+        /// without waiting for a new message when the channel is empty.
+        ///
+        /// This method differs from [`recv`] by returning immediately if the
+        /// channel is empty or closed.
+        ///
+        /// # Errors
+        ///
+        /// This method returns an error when the channel is closed or there are
+        /// no remaining messages in the channel's buffer.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{channel, errors::TryRecvError};
+        ///
+        /// let (tx, rx) = channel(100);
+        /// assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+        ///
+        /// tx.try_send(1).unwrap();
+        /// drop(tx);
+        ///
+        /// assert_eq!(rx.try_recv().unwrap(), 1);
+        /// assert_eq!(rx.try_recv(), Err(TryRecvError::Closed));
+        /// ```
+        ///
+        /// [`recv`]: Self::recv
         pub fn try_recv(&self) -> Result<T, TryRecvError>
         where
             R: Recycle<T>,

@@ -357,11 +357,7 @@ where
     }
 
     fn try_recv_ref<'a, T>(&'a self, slots: &'a [Slot<T>]) -> Result<Ref<'a, T>, TryRecvError> {
-        match self.core.pop_ref(slots) {
-            Ok(slot) => Ok(slot),
-            Err(TrySendError::Closed(_)) => Err(TryRecvError::Closed),
-            Err(_) => Err(TryRecvError::Empty),
-        }
+        self.core.pop_ref(slots)
     }
 
     fn try_recv<T, R>(&self, slots: &[Slot<T>], recycle: &R) -> Result<T, TryRecvError>
@@ -389,7 +385,7 @@ where
                 // If we got a value, return it!
                 match self.core.pop_ref(slots) {
                     Ok(slot) => return Poll::Ready(Some(slot)),
-                    Err(TrySendError::Closed(_)) => return Poll::Ready(None),
+                    Err(TryRecvError::Closed) => return Poll::Ready(None),
                     _ => {}
                 }
             };

@@ -137,3 +137,17 @@ impl<T> fmt::Display for TrySendError<T> {
 
 #[cfg(feature = "std")]
 impl<T> std::error::Error for TrySendError<T> {}
+
+// == impl TryRecvError ==
+
+#[cfg(feature = "std")]
+impl std::error::Error for TryRecvError {}
+
+impl fmt::Display for TryRecvError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Empty => "channel is empty",
+            Self::Closed => "channel closed",
+        })
+    }
+}
