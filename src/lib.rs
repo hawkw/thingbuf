@@ -39,7 +39,7 @@ use crate::{
         atomic::{AtomicUsize, Ordering::*},
         cell::{MutPtr, UnsafeCell},
     },
-    mpsc::errors::TrySendError,
+    mpsc::errors::{TryRecvError, TrySendError},
     util::{Backoff, CachePadded},
 };
 
@@ -281,7 +281,7 @@ impl Core {
     }
 
     #[inline(always)]
-    fn pop_ref<'slots, T>(&self, slots: &'slots [Slot<T>]) -> Result<Ref<'slots, T>, TrySendError> {
+    fn pop_ref<'slots, T>(&self, slots: &'slots [Slot<T>]) -> Result<Ref<'slots, T>, TryRecvError> {
         test_println!("pop_ref");
         let mut backoff = Backoff::new();
         let mut head = self.head.load(Relaxed);
@@ -347,15 +347,15 @@ impl Core {
 
                 if test_dbg!(tail & !self.closed == head) {
                     return if test_dbg!(tail & self.closed != 0) {
-                        Err(TrySendError::Closed(()))
+                        Err(TryRecvError::Closed)
                     } else {
-                        test_println!("--> channel full!");
-                        Err(TrySendError::Full(()))
+                        test_println!("--> channel empty!");
+                        Err(TryRecvError::Empty)
                     };
                 }
 
                 if test_dbg!(backoff.done_spinning()) {
-                    return Err(TrySendError::Full(()));
+                    return Err(TryRecvError::Empty);
                 }
 
                 backoff.spin();

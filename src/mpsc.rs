@@ -248,14 +248,14 @@
 //! [blocking sender]: blocking::Sender
 use crate::{
     loom::{atomic::AtomicUsize, hint},
-    recycling::Recycle,
+    recycling::{take, Recycle},
     wait::{Notify, WaitCell, WaitQueue, WaitResult},
     Core, Ref, Slot,
 };
 use core::{fmt, task::Poll};
 
 pub mod errors;
-use self::errors::TrySendError;
+use self::errors::{TryRecvError, TrySendError};
 
 #[derive(Debug)]
 struct ChannelCore<N> {
@@ -356,6 +356,20 @@ where
         }
     }
 
+    fn try_recv_ref<'a, T>(&'a self, slots: &'a [Slot<T>]) -> Result<Ref<'a, T>, TryRecvError> {
+        self.core.pop_ref(slots)
+    }
+
+    fn try_recv<T, R>(&self, slots: &[Slot<T>], recycle: &R) -> Result<T, TryRecvError>
+    where
+        R: Recycle<T>,
+    {
+        match self.try_recv_ref(slots) {
+            Ok(mut slot) => Ok(take(&mut *slot, recycle)),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Performs one iteration of the `recv_ref` loop.
     ///
     /// The loop itself has to be written in the actual `send` method's
@@ -371,7 +385,7 @@ where
                 // If we got a value, return it!
                 match self.core.pop_ref(slots) {
                     Ok(slot) => return Poll::Ready(Some(slot)),
-                    Err(TrySendError::Closed(_)) => return Poll::Ready(None),
+                    Err(TryRecvError::Closed) => return Poll::Ready(None),
                     _ => {}
                 }
             };
