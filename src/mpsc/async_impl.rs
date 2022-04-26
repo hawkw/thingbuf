@@ -3,7 +3,6 @@ use crate::{
     loom::atomic::{self, Ordering},
     recycling::{self, Recycle},
     wait::queue,
-    Ref,
 };
 use core::{
     fmt,
@@ -449,11 +448,11 @@ feature! {
         /// ```
         ///
         /// [`recv_ref`]: Self::recv_ref
-        pub fn try_recv_ref(&self) -> Result<Ref<'_, T>, TryRecvError>
+        pub fn try_recv_ref(&self) -> Result<RecvRef<'_, T>, TryRecvError>
         where
             R: Recycle<T>,
         {
-            self.inner.core.try_recv_ref(self.inner.slots.as_ref())
+            self.inner.core.try_recv_ref(self.inner.slots.as_ref()).map(RecvRef)
         }
 
         /// Attempts to receive the next message for this receiver by reference
@@ -1154,11 +1153,11 @@ feature! {
         /// ```
         ///
         /// [`recv_ref`]: Self::recv_ref
-        pub fn try_recv_ref(&self) -> Result<Ref<'_, T>, TryRecvError>
+        pub fn try_recv_ref(&self) -> Result<RecvRef<'_, T>, TryRecvError>
         where
             R: Recycle<T>,
         {
-            self.core.try_recv_ref(self.slots.as_ref())
+            self.core.try_recv_ref(self.slots.as_ref()).map(RecvRef)
         }
 
         /// Attempts to receive the next message for this receiver by reference
@@ -1394,9 +1393,11 @@ fn poll_recv_ref<'a, T>(
 ) -> Poll<Option<RecvRef<'a, T>>> {
     core.poll_recv_ref(slots, || cx.waker().clone())
         .map(|some| {
-            some.map(|slot| RecvRef {
-                _notify: super::NotifyTx(&core.tx_wait),
-                slot,
+            some.map(|slot| {
+                RecvRef(RecvRefInner {
+                    _notify: super::NotifyTx(&core.tx_wait),
+                    slot,
+                })
             })
         })
 }
