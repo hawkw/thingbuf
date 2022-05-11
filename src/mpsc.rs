@@ -285,6 +285,26 @@ struct SendRefInner<'a, T, N: Notify> {
     _notify: NotifyRx<'a, N>,
 }
 
+struct RecvRefInner<'a, T, N: Notify + Unpin> {
+    // /!\ LOAD BEARING STRUCT DROP ORDER /!\
+    //
+    // The `Ref` field *must* be dropped before the `NotifyTx` field, or else
+    // loom tests will fail. This ensures that the mutable access to the slot is
+    // considered to have ended *before* the receiver thread/task is notified.
+    //
+    // The alternatives to a load-bearing drop order would be:
+    // (a) put one field inside an `Option` so it can be dropped before the
+    //     other (not great, as it adds a little extra overhead even outside
+    //     of Loom tests),
+    // (b) use `core::mem::ManuallyDrop` (also not great, requires additional
+    //     unsafe code that in this case we can avoid)
+    //
+    // So, given that, relying on struct field drop order seemed like the least
+    // bad option here. Just don't reorder these fields. :)
+    slot: Ref<'a, T>,
+    _notify: crate::mpsc::NotifyTx<'a, N>,
+}
+
 struct NotifyRx<'a, N: Notify>(&'a WaitCell<N>);
 struct NotifyTx<'a, N: Notify + Unpin>(&'a WaitQueue<N>);
 
@@ -356,8 +376,14 @@ where
         }
     }
 
-    fn try_recv_ref<'a, T>(&'a self, slots: &'a [Slot<T>]) -> Result<Ref<'a, T>, TryRecvError> {
-        self.core.pop_ref(slots)
+    fn try_recv_ref<'a, T>(
+        &'a self,
+        slots: &'a [Slot<T>],
+    ) -> Result<RecvRefInner<'a, T, N>, TryRecvError> {
+        self.core.pop_ref(slots).map(|slot| RecvRefInner {
+            _notify: NotifyTx(&self.tx_wait),
+            slot,
+        })
     }
 
     fn try_recv<T, R>(&self, slots: &[Slot<T>], recycle: &R) -> Result<T, TryRecvError>
@@ -484,6 +510,52 @@ impl<T: fmt::Write, N: Notify> fmt::Write for SendRefInner<'_, T, N> {
     }
 }
 
+// === impl RecvRefInner ===
+
+impl<T, N: Notify + Unpin> core::ops::Deref for RecvRefInner<'_, T, N> {
+    type Target = T;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.slot.deref()
+    }
+}
+
+impl<T, N: Notify + Unpin> core::ops::DerefMut for RecvRefInner<'_, T, N> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.slot.deref_mut()
+    }
+}
+
+impl<T: fmt::Debug, N: Notify + Unpin> fmt::Debug for RecvRefInner<'_, T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.slot.fmt(f)
+    }
+}
+
+impl<T: fmt::Display, N: Notify + Unpin> fmt::Display for RecvRefInner<'_, T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.slot.fmt(f)
+    }
+}
+
+impl<T: fmt::Write, N: Notify + Unpin> fmt::Write for RecvRefInner<'_, T, N> {
+    #[inline]
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.slot.write_str(s)
+    }
+
+    #[inline]
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        self.slot.write_char(c)
+    }
+
+    #[inline]
+    fn write_fmt(&mut self, f: fmt::Arguments<'_>) -> fmt::Result {
+        self.slot.write_fmt(f)
+    }
+}
+
 impl<N: Notify> Drop for NotifyRx<'_, N> {
     #[inline]
     fn drop(&mut self) {
@@ -500,10 +572,10 @@ impl<N: Notify + Unpin> Drop for NotifyTx<'_, N> {
     }
 }
 
-macro_rules! impl_send_ref {
-    ($(#[$m:meta])* pub struct $name:ident<$notify:ty>;) => {
+macro_rules! impl_ref_inner {
+    ($(#[$m:meta])*, $inner:ident, $name:ident, $notify:ty) => {
         $(#[$m])*
-        pub struct $name<'sender, T>(SendRefInner<'sender, T, $notify>);
+        pub struct $name<'a, T>($inner<'a, T, $notify>);
 
         impl<T> core::ops::Deref for $name<'_, T> {
             type Target = T;
@@ -552,73 +624,15 @@ macro_rules! impl_send_ref {
     };
 }
 
+macro_rules! impl_send_ref {
+    ($(#[$m:meta])* pub struct $name:ident<$notify:ty>;) => {
+        impl_ref_inner!($(#[$m])*, SendRefInner, $name, $notify);
+    };
+}
+
 macro_rules! impl_recv_ref {
     ($(#[$m:meta])* pub struct $name:ident<$notify:ty>;) => {
-        $(#[$m])*
-        pub struct $name<'recv, T> {
-            // /!\ LOAD BEARING STRUCT DROP ORDER /!\
-            //
-            // The `Ref` field *must* be dropped before the `NotifyTx` field, or else
-            // loom tests will fail. This ensures that the mutable access to the slot is
-            // considered to have ended *before* the receiver thread/task is notified.
-            //
-            // The alternatives to a load-bearing drop order would be:
-            // (a) put one field inside an `Option` so it can be dropped before the
-            //     other (not great, as it adds a little extra overhead even outside
-            //     of Loom tests),
-            // (b) use `core::mem::ManuallyDrop` (also not great, requires additional
-            //     unsafe code that in this case we can avoid)
-            //
-            // So, given that, relying on struct field drop order seemed like the least
-            // bad option here. Just don't reorder these fields. :)
-            slot: Ref<'recv, T>,
-            _notify: crate::mpsc::NotifyTx<'recv, $notify>,
-        }
-
-        impl<T> core::ops::Deref for $name<'_, T> {
-            type Target = T;
-
-            #[inline]
-            fn deref(&self) -> &Self::Target {
-                self.slot.deref()
-            }
-        }
-
-        impl<T> core::ops::DerefMut for $name<'_, T> {
-            #[inline]
-            fn deref_mut(&mut self) -> &mut Self::Target {
-                self.slot.deref_mut()
-            }
-        }
-
-        impl<T: fmt::Debug> fmt::Debug for $name<'_, T> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.slot.fmt(f)
-            }
-        }
-
-        impl<T: fmt::Display> fmt::Display for $name<'_, T> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.slot.fmt(f)
-            }
-        }
-
-        impl<T: fmt::Write> fmt::Write for $name<'_, T> {
-            #[inline]
-            fn write_str(&mut self, s: &str) -> fmt::Result {
-                self.slot.write_str(s)
-            }
-
-            #[inline]
-            fn write_char(&mut self, c: char) -> fmt::Result {
-                self.slot.write_char(c)
-            }
-
-            #[inline]
-            fn write_fmt(&mut self, f: fmt::Arguments<'_>) -> fmt::Result {
-                self.slot.write_fmt(f)
-            }
-        }
+        impl_ref_inner!($(#[$m])*, RecvRefInner, $name, $notify);
     };
 }
 

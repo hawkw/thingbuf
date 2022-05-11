@@ -13,7 +13,6 @@ use crate::{
     recycling::{self, Recycle},
     util::Backoff,
     wait::queue,
-    Ref,
 };
 use core::{fmt, pin::Pin};
 use errors::*;
@@ -602,11 +601,11 @@ feature! {
         /// ```
         ///
         /// [`recv_ref`]: Self::recv_ref
-        pub fn try_recv_ref(&self) -> Result<Ref<'_, T>, TryRecvError>
+        pub fn try_recv_ref(&self) -> Result<RecvRef<'_, T>, TryRecvError>
         where
             R: Recycle<T>,
         {
-            self.core.try_recv_ref(self.slots.as_ref())
+            self.core.try_recv_ref(self.slots.as_ref()).map(RecvRef)
         }
 
         /// Attempts to receive the next message for this receiver by value
@@ -1061,8 +1060,11 @@ impl<T, R> Receiver<T, R> {
     /// ```
     ///
     /// [`recv_ref`]: Self::recv_ref
-    pub fn try_recv_ref(&self) -> Result<Ref<'_, T>, TryRecvError> {
-        self.inner.core.try_recv_ref(self.inner.slots.as_ref())
+    pub fn try_recv_ref(&self) -> Result<RecvRef<'_, T>, TryRecvError> {
+        self.inner
+            .core
+            .try_recv_ref(self.inner.slots.as_ref())
+            .map(RecvRef)
     }
 
     /// Attempts to receive the next message for this receiver by value
@@ -1148,9 +1150,11 @@ fn recv_ref<'a, T>(core: &'a ChannelCore<Thread>, slots: &'a [Slot<T>]) -> Optio
     loop {
         match core.poll_recv_ref(slots, thread::current) {
             Poll::Ready(r) => {
-                return r.map(|slot| RecvRef {
-                    _notify: super::NotifyTx(&core.tx_wait),
-                    slot,
+                return r.map(|slot| {
+                    RecvRef(RecvRefInner {
+                        _notify: super::NotifyTx(&core.tx_wait),
+                        slot,
+                    })
                 })
             }
             Poll::Pending => {
