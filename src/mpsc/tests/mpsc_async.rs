@@ -35,6 +35,47 @@ fn mpsc_try_send_recv() {
 }
 
 #[test]
+#[cfg_attr(ci_skip_slow_models, ignore)]
+fn mpsc_try_recv_ref() {
+    loom::model(|| {
+        let (tx, rx) = channel(2);
+
+        let p1 = {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                future::block_on(async move {
+                    tx.send(1).await.unwrap();
+                    tx.send(2).await.unwrap();
+                })
+            })
+        };
+        let p2 = thread::spawn(move || {
+            future::block_on(async move {
+                tx.send(3).await.unwrap();
+                tx.send(4).await.unwrap();
+            })
+        });
+
+        let mut vals = Vec::new();
+
+        while vals.len() < 4 {
+            match rx.try_recv_ref() {
+                Ok(val) => vals.push(*val),
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Closed) => panic!("channel closed"),
+            }
+            thread::yield_now();
+        }
+
+        vals.sort_unstable();
+        assert_eq_dbg!(vals, vec![1, 2, 3, 4]);
+
+        p1.join().unwrap();
+        p2.join().unwrap();
+    })
+}
+
+#[test]
 fn rx_closes() {
     const ITERATIONS: usize = 6;
     loom::model(|| {

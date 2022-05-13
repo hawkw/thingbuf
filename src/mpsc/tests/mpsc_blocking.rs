@@ -2,15 +2,7 @@ use super::*;
 use crate::loom::{self, alloc::Track, thread};
 
 #[test]
-// This test currently fails because `loom` implements the wrong semantics for
-// `Thread::unpark()`/`thread::park` (see
-// https://github.com/tokio-rs/loom/issues/246).
-// However, it implements the correct semantics for async `Waker`s (which
-// _should_ be the same as park/unpark), so the async version of this test more
-// or less verifies that the algorithm here is correct.
-//
-// TODO(eliza): when tokio-rs/loom#246 is fixed, we can re-enable this test!
-#[ignore]
+#[cfg_attr(ci_skip_slow_models, ignore)]
 fn mpsc_try_send_recv() {
     loom::model(|| {
         let (tx, rx) = blocking::channel(3);
@@ -34,6 +26,45 @@ fn mpsc_try_send_recv() {
 
         vals.sort_unstable();
         assert_eq_dbg!(vals, vec![1, 2, 3]);
+
+        p1.join().unwrap();
+        p2.join().unwrap();
+    })
+}
+
+#[test]
+#[cfg_attr(ci_skip_slow_models, ignore)]
+fn mpsc_try_recv_ref() {
+    loom::model(|| {
+        let (tx, rx) = blocking::channel(2);
+
+        let p1 = {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                *tx.send_ref().unwrap() = 1;
+                thread::yield_now();
+                *tx.send_ref().unwrap() = 2;
+            })
+        };
+        let p2 = thread::spawn(move || {
+            *tx.send_ref().unwrap() = 3;
+            thread::yield_now();
+            *tx.send_ref().unwrap() = 4;
+        });
+
+        let mut vals = Vec::new();
+
+        while vals.len() < 4 {
+            match rx.try_recv_ref() {
+                Ok(val) => vals.push(*val),
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Closed) => panic!("channel closed"),
+            }
+            thread::yield_now();
+        }
+
+        vals.sort_unstable();
+        assert_eq_dbg!(vals, vec![1, 2, 3, 4]);
 
         p1.join().unwrap();
         p2.join().unwrap();
@@ -185,15 +216,7 @@ fn spsc_recv_then_try_send_then_close() {
 }
 
 #[test]
-// This test currently fails because `loom` implements the wrong semantics for
-// `Thread::unpark()`/`thread::park` (see
-// https://github.com/tokio-rs/loom/issues/246).
-// However, it implements the correct semantics for async `Waker`s (which
-// _should_ be the same as park/unpark), so the async version of this test more
-// or less verifies that the algorithm here is correct.
-//
-// TODO(eliza): when tokio-rs/loom#246 is fixed, we can re-enable this test!
-#[ignore]
+#[cfg_attr(ci_skip_slow_models, ignore)]
 fn mpsc_send_recv_wrap() {
     loom::model(|| {
         let (tx, rx) = blocking::channel::<usize>(1);
@@ -284,15 +307,6 @@ fn spsc_send_recv_in_order_no_wrap() {
 }
 
 #[test]
-// This test currently fails because `loom` implements the wrong semantics for
-// `Thread::unpark()`/`thread::park` (see
-// https://github.com/tokio-rs/loom/issues/246).
-// However, it implements the correct semantics for async `Waker`s (which
-// _should_ be the same as park/unpark), so the async version of this test more
-// or less verifies that the algorithm here is correct.
-//
-// TODO(eliza): when tokio-rs/loom#246 is fixed, we can re-enable this test!
-#[ignore]
 fn spsc_send_recv_in_order_wrap() {
     const N_SENDS: usize = 2;
     loom::model(|| {

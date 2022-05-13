@@ -26,8 +26,9 @@ jobs:
         model:
           - mpsc_send_recv_wrap
           - mpsc_try_send_recv
-          - mpsc::rx_close_unconsumed
-          - mpsc_sync::rx_close_unconsumed
+          - mpsc_try_recv_ref
+          - mpsc_async::rx_close_unconsumed
+          - mpsc_blocking::rx_close_unconsumed
     name: model '${{ matrix.model }}''
     runs-on: ubuntu-latest
     steps:
@@ -54,7 +55,7 @@ jobs:
         scope:
           # NOTE: if adding loom models in a new module, that module needs to be
           # added to this list!
-          - mpsc_sync
+          - mpsc_blocking
           - mpsc_async
           - thingbuf
           - util
