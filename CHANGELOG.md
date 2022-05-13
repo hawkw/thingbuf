@@ -1,3 +1,17 @@
+<a name="v0.1.3"></a>
+### v0.1.3 (2022-05-13)
+
+
+#### Features
+
+* **mpsc:**  add `Receiver::try_recv` method  (#60) ([e04661fc](https://github.com/hawkw/thingbuf/commit/e04661fc72b08c4e2517a9f0bfb16aa7d2fed683))
+
+#### Bug Fixes
+
+* **mpsc:**  `try_recv_ref` should return `RecvRef` (#61) ([47f16f59](https://github.com/hawkw/thingbuf/commit/47f16f59579e7a5d11a69c47c4a3b7379b758c75))
+
+
+
 <a name="v0.1.2"></a>
 ### v0.1.2 (2022-04-12)
 
