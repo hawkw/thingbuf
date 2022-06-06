@@ -34,7 +34,7 @@ jobs:
   changed_paths:
     continue-on-error: true
     runs-on: ubuntu-latest
-   outputs:
+    outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
     steps:
       - id: skip_check
