@@ -1,0 +1,252 @@
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+
+env:
+  # disable incremental compilation.
+  #
+  # incremental compilation is useful as part of an edit-build-test-edit cycle,
+  # as it lets the compiler avoid recompiling code that hasn't changed. however,
+  # on CI, we're not making small edits; we're almost always building the entire
+  # project from scratch. thus, incremental compilation on CI actually
+  # introduces *additional* overhead to support making future builds
+  # faster...but no future builds will ever occur in any given CI environment.
+  #
+  # see https://matklad.github.io/2021/09/04/fast-rust-builds.html#ci-workflow
+  # for details.
+  CARGO_INCREMENTAL: 0
+  # allow more retries for network requests in cargo (downloading crates) and
+  # rustup (installing toolchains). this should help to reduce flaky CI failures
+  # from transient network timeouts or other issues.
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  # don't emit giant backtraces in the CI logs.
+  RUST_BACKTRACE: short
+  RUSTFLAGS: -Dwarnings
+  msrv: 1.57.0
+  LOOM_LOG: 'thingbuf=trace,debug'
+
+name: CI
+
+jobs:
+  changed_paths:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          do_not_skip: '["workflow_dispatch", "push"]'
+          paths: '["**/*.rs", "**/Cargo.toml", ".github/workflows/ci.yml"]'
+
+  build_no_std:
+    name: Check no_std
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    strategy:
+      matrix:
+        feature: [alloc, static]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+        components: rustfmt
+    - uses: actions-rs/cargo@v1
+      with:
+        command: check
+        args: --no-default-features --features ${{ matrix.feature }}
+
+  tests:
+    name: Tests
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    strategy:
+      matrix:
+        # test all Rust versions on Ubuntu
+        rust: [stable, 1.57.0]
+        os: [ubuntu-latest]
+        # test stable Rust on Windows and MacOS as well
+        include:
+          - rust: stable
+            os: windows-latest
+          - rust: stable
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rustfmt
+      - name: Run cargo test (with static APIs)
+        if: ${{ matrix.rust != env.msrv }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all-features
+      - name: Run cargo test (no static APIs)
+        if: ${{ matrix.rust == env.msrv }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          # skip doctests, which require all features to be enabled
+          args: --lib --tests
+
+  benches:
+    name: Compile benchmarks
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: -p bench --benches
+
+  rustfmt:
+    runs-on: ubuntu-latest
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+  clippy_check:
+    name: Clippy check
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            components: clippy
+            override: true
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Run particularly slow loom models individually
+  slow_models:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    strategy:
+      matrix:
+        model:
+          - mpsc_send_recv_wrap
+          - mpsc_try_send_recv
+          - mpsc_try_recv_ref
+          - mpsc_async::rx_close_unconsumed
+          - mpsc_blocking::rx_close_unconsumed
+    name: model '${{ matrix.model }}''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Run model
+        run: cargo test --profile loom --lib -- ${{ matrix.model }}
+        env:
+          # it would be nice to run these with more preemptions, but
+          # that makes these models super slow...and LOOM_MAX_PREEMPTIONS=1 is
+          # good enough for Tokio's CI, so...
+          LOOM_MAX_PREEMPTIONS: 1
+          RUSTFLAGS: "--cfg loom"
+
+  # Run other loom models by scope
+  models:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    strategy:
+      matrix:
+        scope:
+          # NOTE: if adding loom models in a new module, that module needs to be
+          # added to this list!
+          - mpsc_blocking
+          - mpsc_async
+          - thingbuf
+          - util
+    name: models in '${{ matrix.scope }}'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Run models
+        run: cargo test --profile loom --lib -- ${{ matrix.scope }}
+        env:
+          LOOM_MAX_PREEMPTIONS: 2
+          # `--cfg ci_skip_slow_models` will exclude the loom models that are
+          # tested in `slow-models`.
+          RUSTFLAGS: "--cfg loom --cfg ci_skip_slow_models"
+
+  # Dummy job that requires all loom models to pass
+  all_models:
+    name: all loom models
+    runs-on: ubuntu-latest
+    needs:
+      - slow_models
+      - models
+    steps:
+      - run: exit 0
+
+  miri:
+    name: Miri tests
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+          components: miri
+      - name: Run Miri tests
+        run: cargo miri test --lib --no-fail-fast
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-tag-raw-pointers
