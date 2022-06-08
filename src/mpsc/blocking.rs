@@ -1145,21 +1145,34 @@ impl<T, R> Drop for Inner<T, R> {
     }
 }
 
-#[inline]
 fn recv_ref<'a, T>(core: &'a ChannelCore<Thread>, slots: &'a [Slot<T>]) -> Option<RecvRef<'a, T>> {
     loop {
-        match core.poll_recv_ref(slots, thread::current) {
-            Poll::Ready(r) => {
-                return r.map(|slot| {
-                    RecvRef(RecvRefInner {
-                        _notify: super::NotifyTx(&core.tx_wait),
-                        slot,
-                    })
-                })
-            }
-            Poll::Pending => {
+        test_println!("recv_ref");
+
+        // try to receive a reference, returning if we succeeded or the
+        // channel is closed.
+        match core.try_recv_ref(slots) {
+            Ok(slot) => return Some(RecvRef(slot)),
+            Err(TryRecvError::Closed) => return None,
+            Err(TryRecvError::Empty) => {}
+        }
+
+        // otherwise, gotosleep
+        match test_dbg!(core.rx_wait.wait_with(thread::current)) {
+            WaitResult::Wait => {
                 test_println!("parking ({:?})", thread::current());
                 thread::park();
+            }
+            WaitResult::Closed => {
+                // the channel is closed (all the receivers are dropped).
+                // however, there may be messages left in the queue. try
+                // popping from the queue until it's empty.
+                return core.try_recv_ref(slots).ok().map(RecvRef);
+            }
+            WaitResult::Notified => {
+                // we were notified while we were trying to register the
+                // waiter. loop and try polling again.
+                hint::spin_loop();
             }
         }
     }

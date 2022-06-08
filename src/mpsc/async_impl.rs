@@ -1385,21 +1385,49 @@ enum State {
 
 // === impl RecvRefFuture ===
 
-#[inline]
+/// Performs one iteration of the `recv_ref` loop.
 fn poll_recv_ref<'a, T>(
     core: &'a ChannelCore<Waker>,
     slots: &'a [Slot<T>],
     cx: &mut Context<'_>,
 ) -> Poll<Option<RecvRef<'a, T>>> {
-    core.poll_recv_ref(slots, || cx.waker().clone())
-        .map(|some| {
-            some.map(|slot| {
-                RecvRef(RecvRefInner {
-                    _notify: super::NotifyTx(&core.tx_wait),
-                    slot,
-                })
-            })
-        })
+    let mut should_yield = false;
+    loop {
+        test_println!("poll_recv_ref; should_yield={:?}", should_yield);
+
+        // try to receive a reference, returning if we succeeded or the
+        // channel is closed.
+        match core.try_recv_ref(slots) {
+            Ok(slot) => return Poll::Ready(Some(RecvRef(slot))),
+            Err(TryRecvError::Closed) => return Poll::Ready(None),
+            Err(TryRecvError::Empty) => {
+                if should_yield {
+                    return Poll::Pending;
+                }
+            }
+        }
+
+        // otherwise, gotosleep
+        match test_dbg!(core.rx_wait.wait_with(|| cx.waker().clone())) {
+            WaitResult::Wait => {
+                // we successfully registered a waiter! try polling again,
+                // just in case someone sent a message while we were
+                // registering the waiter.
+                should_yield = true;
+            }
+            WaitResult::Closed => {
+                // the channel is closed (all the receivers are dropped).
+                // however, there may be messages left in the queue. try
+                // popping from the queue until it's empty.
+                return Poll::Ready(core.try_recv_ref(slots).ok().map(RecvRef));
+            }
+            WaitResult::Notified => {
+                // we were notified while we were trying to register the
+                // waiter. loop and try polling again.
+                hint::spin_loop();
+            }
+        }
+    }
 }
 
 impl<'a, T> Future for RecvRefFuture<'a, T> {

@@ -395,60 +395,6 @@ where
             Err(e) => Err(e),
         }
     }
-
-    /// Performs one iteration of the `recv_ref` loop.
-    ///
-    /// The loop itself has to be written in the actual `send` method's
-    /// implementation, rather than on `inner`, because it might be async and
-    /// may yield, or might park the thread.
-    fn poll_recv_ref<'a, T>(
-        &'a self,
-        slots: &'a [Slot<T>],
-        mk_waiter: impl Fn() -> N,
-    ) -> Poll<Option<Ref<'a, T>>> {
-        macro_rules! try_poll_recv {
-            () => {
-                // If we got a value, return it!
-                match self.core.pop_ref(slots) {
-                    Ok(slot) => return Poll::Ready(Some(slot)),
-                    Err(TryRecvError::Closed) => return Poll::Ready(None),
-                    _ => {}
-                }
-            };
-        }
-
-        test_println!("poll_recv_ref");
-        loop {
-            test_println!("poll_recv_ref => loop");
-
-            // try to receive a reference, returning if we succeeded or the
-            // channel is closed.
-            try_poll_recv!();
-
-            // otherwise, gotosleep
-            match test_dbg!(self.rx_wait.wait_with(&mk_waiter)) {
-                WaitResult::Wait => {
-                    // we successfully registered a waiter! try polling again,
-                    // just in case someone sent a message while we were
-                    // registering the waiter.
-                    try_poll_recv!();
-                    test_println!("-> yield");
-                    return Poll::Pending;
-                }
-                WaitResult::Closed => {
-                    // the channel is closed (all the receivers are dropped).
-                    // however, there may be messages left in the queue. try
-                    // popping from the queue until it's empty.
-                    return Poll::Ready(self.core.pop_ref(slots).ok());
-                }
-                WaitResult::Notified => {
-                    // we were notified while we were trying to register the
-                    // waiter. loop and try polling again.
-                    hint::spin_loop();
-                }
-            }
-        }
-    }
 }
 
 // === impl SendRefInner ===
