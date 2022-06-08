@@ -14,18 +14,12 @@ set -euo pipefail
 set -x
 
 cd "$(dirname "$0")"/..
-TESTCMD=(test)
 
-# if cargo nextest is installed, use it instead!
-if cargo --list | grep -q "nextest"; then
-    TESTCMD=(nextest run --cargo-profile loom)
+# is cargo loom installed?
+if ! cargo --list | grep -q "loom"; then
+    RUSTFLAGS="--cfg tokio_unstable" \
+        cargo install \
+        --git https://github.com/hawkw/cargo-loom
 fi
 
-TESTCMD+=(--profile loom --lib)
-# pass through args
-TESTCMD+=(${@})
-
-RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}" \
-    LOOM_LOG="${LOOM_LOG:-info}" \
-    LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" \
-    cargo ${TESTCMD[@]}
+cargo loom --lib "$@"
