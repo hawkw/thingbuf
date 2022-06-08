@@ -4,15 +4,9 @@ macro_rules! test_println {
         if crate::util::panic::panicking() {
             // getting the thread ID while panicking doesn't seem to play super nicely with loom's
             // mock lazy_static...
-            println!("[PANIC {:>30}:{:<3}] {}", file!(), line!(), format_args!($($arg)*))
+            tracing::error!("[PANIC] {}", format_args!($($arg)*))
         } else {
-            crate::loom::traceln(format_args!(
-                "[{:?} {:>30}:{:<3}] {}",
-                crate::loom::thread::current().id(),
-                file!(),
-                line!(),
-                format_args!($($arg)*),
-            ));
+            tracing::debug!($($arg)*);
         }
     }
 }
