@@ -48,9 +48,6 @@ inherits = "test"
 lto = true
 opt-level = 3
 
-[patch.crates-io]
-loom = { git = "https://github.com/tokio-rs/loom", rev = "a93bf2390e0fcfdb7c5899b31db0e4e795ab4aab" }
-
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
