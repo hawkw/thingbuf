@@ -27,7 +27,7 @@
 
 `thingbuf` is a lock-free array-based concurrent ring buffer that allows access
 to slots in the buffer by reference. It's also [asynchronous][`thingbuf::mpsc`]
-and [blocking][`thingbuf::mpsc::sync`] bounded MPSC channels implemented using
+and [blocking][`thingbuf::mpsc::blocking`] bounded MPSC channels implemented using
 the ring buffer.
 
 ### When Should I Use It?
@@ -38,7 +38,7 @@ the ring buffer.
   [`thingbuf::mpsc`] is a competitive choice for a general-purpose
   MPSC channel in most use cases.
 
-  Both [asynchronous][`thingbuf::mpsc`] and [blocking][`thingbuf::mpsc::sync`]
+  Both [asynchronous][`thingbuf::mpsc`] and [blocking][`thingbuf::mpsc::blocking`]
   MPSC channels are available, so `thingbuf` can be used in place
   of asynchronous channels like [`futures::channel::mpsc`] *and* blocking
   channels like [`std::sync::mpsc::sync_channel`].
@@ -198,7 +198,7 @@ feature flag requries Rust 1.60+.
   So, "thingbuf".
 
 [`thingbuf::mpsc`]: https://docs.rs/thingbuf/0.1/thingbuf/mpsc/index.html
-[`thingbuf::mpsc::sync`]: https://docs.rs/thingbuf/0.1/thingbuf/mpsc/sync/index.html
+[`thingbuf::mpsc::blocking`]: https://docs.rs/thingbuf/0.1/thingbuf/mpsc/blocking/index.html
 [static-queue]: https://docs.rs/thingbuf/0.1/thingbuf/struct.StaticThingBuf.html
 [static-mpsc]: https://docs.rs/thingbuf/0.1./thingbuf/mpsc/struct.StaticChannel.html
 [`futures::channel::mpsc`]: https://docs.rs/futures/latest/futures/channel/mpsc/index.html
