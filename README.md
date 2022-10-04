@@ -8,7 +8,6 @@
 [![Documentation (HEAD)][docs-main-badge]][docs-main-url]
 [![MIT licensed][mit-badge]][mit-url]
 [![Test Status][tests-badge]][tests-url]
-[![Loom Models][loom-badge]][loom-url]
 [![Sponsor @hawkw on GitHub Sponsors][sponsor-badge]][sponsor-url]
 
 [crates-badge]: https://img.shields.io/crates/v/thingbuf.svg
@@ -19,10 +18,8 @@
 [docs-main-url]: https://thingbuf.elizas.website
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: ../LICENSE
-[tests-badge]: https://github.com/hawkw/thingbuf/actions/workflows/tests.yml/badge.svg?branch=main
-[tests-url]: https://github.com/hawkw/thingbuf/actions/workflows/tests.yml
-[loom-badge]: https://github.com/hawkw/thingbuf/actions/workflows/loom.yml/badge.svg?branch=main
-[loom-url]: https://github.com/hawkw/thingbuf/actions/workflows/loom.yml
+[tests-badge]: https://github.com/hawkw/thingbuf/actions/workflows/ci.yml/badge.svg?branch=main
+[tests-url]: https://github.com/hawkw/thingbuf/actions/workflows/ci.yml
 [sponsor-badge]: https://img.shields.io/badge/sponsor-%F0%9F%A4%8D-ff69b4
 [sponsor-url]: https://github.com/sponsors/hawkw
 
@@ -30,7 +27,7 @@
 
 `thingbuf` is a lock-free array-based concurrent ring buffer that allows access
 to slots in the buffer by reference. It's also [asynchronous][`thingbuf::mpsc`]
-and [blocking][`thingbuf::mpsc::sync`] bounded MPSC channels implemented using
+and [blocking][`thingbuf::mpsc::blocking`] bounded MPSC channels implemented using
 the ring buffer.
 
 ### When Should I Use It?
@@ -41,7 +38,7 @@ the ring buffer.
   [`thingbuf::mpsc`] is a competitive choice for a general-purpose
   MPSC channel in most use cases.
 
-  Both [asynchronous][`thingbuf::mpsc`] and [blocking][`thingbuf::mpsc::sync`]
+  Both [asynchronous][`thingbuf::mpsc`] and [blocking][`thingbuf::mpsc::blocking`]
   MPSC channels are available, so `thingbuf` can be used in place
   of asynchronous channels like [`futures::channel::mpsc`] *and* blocking
   channels like [`std::sync::mpsc::sync_channel`].
@@ -201,7 +198,7 @@ feature flag requries Rust 1.60+.
   So, "thingbuf".
 
 [`thingbuf::mpsc`]: https://docs.rs/thingbuf/0.1/thingbuf/mpsc/index.html
-[`thingbuf::mpsc::sync`]: https://docs.rs/thingbuf/0.1/thingbuf/mpsc/sync/index.html
+[`thingbuf::mpsc::blocking`]: https://docs.rs/thingbuf/0.1/thingbuf/mpsc/blocking/index.html
 [static-queue]: https://docs.rs/thingbuf/0.1/thingbuf/struct.StaticThingBuf.html
 [static-mpsc]: https://docs.rs/thingbuf/0.1./thingbuf/mpsc/struct.StaticChannel.html
 [`futures::channel::mpsc`]: https://docs.rs/futures/latest/futures/channel/mpsc/index.html
