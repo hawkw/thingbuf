@@ -430,7 +430,7 @@ impl<T> Ref<'_, T> {
             // initialized.
             // TODO(eliza): use `MaybeUninit::assume_init_ref` here once it's
             // supported by `tracing-appender`'s MSRV.
-            f(&*(&*value).as_ptr())
+            f(&*(*value).as_ptr())
         })
     }
 
@@ -441,7 +441,7 @@ impl<T> Ref<'_, T> {
             // slot.
             // TODO(eliza): use `MaybeUninit::assume_init_mut` here once it's
             // supported by `tracing-appender`'s MSRV.
-            f(&mut *(&mut *value).as_mut_ptr())
+            f(&mut *(*value).as_mut_ptr())
         })
     }
 }
