@@ -410,6 +410,7 @@ feature! {
         pub fn try_send(&self, val: T) -> Result<(), TrySendError<T>> {
             self.core.try_send(self.slots, val, self.recycle)
         }
+
         /// Returns the *total* capacity of the channel for this [`StaticSender`].
         /// This includes both occupied and unoccupied entries.
         ///
