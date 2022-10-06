@@ -319,6 +319,7 @@ feature! {
         /// [`len`]: Self::len
         /// [`capacity`]: Self::capacity
         #[must_use]
+        #[must_use]
         pub fn remaining(&self) -> usize {
             self.capacity() - self.len()
         }
@@ -755,6 +756,7 @@ feature! {
         /// [`len`]: Self::len
         /// [`capacity`]: Self::capacity
         #[must_use]
+        #[must_use]
         pub fn remaining(&self) -> usize {
             self.capacity() - self.len()
         }
@@ -1168,7 +1170,7 @@ feature! {
             self.core.try_send(self.slots, val, self.recycle)
         }
 
-        /// Returns the *total* capacity of the channel for this [`Sender`].
+        /// Returns the *total* capacity of the channel for this [`StaticSender`].
         /// This includes both occupied and unoccupied entries.
         ///
         /// To determine the channel's remaining *unoccupied* capacity, use
@@ -1207,7 +1209,7 @@ feature! {
             self.core.core.capacity()
         }
 
-        /// Returns the unoccupied capacity of the channel for this [`Sender`]
+        /// Returns the unoccupied capacity of the channel for this [`StaticSender`]
         /// (i.e., how many additional elements can be sent before the channel
         /// will be full).
         ///
@@ -1239,7 +1241,7 @@ feature! {
             self.capacity() - self.len()
         }
 
-        /// Returns the number of elements in the channel of this [`Sender`].
+        /// Returns the number of elements in the channel of this [`StaticSender`].
         ///
         /// To determine the channel's remaining *unoccupied* capacity, use
         /// [`remaining`] instead.
@@ -1270,7 +1272,7 @@ feature! {
             self.core.core.len()
         }
 
-        /// Returns whether the number of elements in the channel of this [`Sender`] is 0.
+        /// Returns whether the number of elements in the channel of this [`StaticSender`] is 0.
         ///
         /// # Examples
         /// ```
@@ -1636,7 +1638,7 @@ feature! {
             test_dbg!(self.core.tx_count.load(Ordering::SeqCst)) <= 1
         }
 
-        /// Returns the *total* capacity of the channel for this [`Receiver`].
+        /// Returns the *total* capacity of the channel for this [`StaticReceiver`].
         /// This includes both occupied and unoccupied entries.
         ///
         /// To determine the channel's remaining *unoccupied* capacity, use
@@ -1675,7 +1677,7 @@ feature! {
             self.core.core.capacity()
         }
 
-        /// Returns the unoccupied capacity of the channel for this [`Receiver`]
+        /// Returns the unoccupied capacity of the channel for this [`StaticReceiver`]
         /// (i.e., how many additional elements can be sent before the channel
         /// will be full).
         ///
@@ -1706,7 +1708,7 @@ feature! {
             self.capacity() - self.len()
         }
 
-        /// Returns the number of elements in the channel of this [`Receiver`].
+        /// Returns the number of elements in the channel of this [`StaticReceiver`].
         ///
         /// To determine the channel's remaining *unoccupied* capacity, use
         /// [`remaining`] instead.
@@ -1737,7 +1739,7 @@ feature! {
             self.core.core.len()
         }
 
-        /// Returns whether the number of elements in the channel of this [`Receiver`] is 0.
+        /// Returns whether the number of elements in the channel of this [`StaticReceiver`] is 0.
         ///
         /// # Examples
         /// ```
