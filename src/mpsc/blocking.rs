@@ -16,6 +16,7 @@ use crate::{
 };
 use core::{fmt, pin::Pin};
 use errors::*;
+use std::time::{Duration, Instant};
 
 /// Returns a new synchronous multi-producer, single consumer (MPSC)
 /// channel with  the provided capacity.
@@ -574,6 +575,80 @@ feature! {
             Some(recycling::take(&mut *val, self.recycle))
         }
 
+        /// Receives the next message for this receiver, **by reference**, waiting for at most `timeout`.
+        /// Returns an error if the corresponding channel has hung up, or if it waits more than `timeout`.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{blocking::StaticChannel, errors::RecvTimeoutError};
+        /// use std::{thread, fmt::Write, time::Duration};
+        ///
+        /// static CHANNEL: StaticChannel<String, 100> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// thread::spawn(move || {
+        ///     thread::sleep(Duration::from_millis(150));
+        ///     let mut value = tx.send_ref().unwrap();
+        ///     write!(value, "hello world!")
+        ///         .expect("writing to a `String` should never fail");
+        /// });
+        ///
+        /// assert_eq!(
+        ///     Err(&RecvTimeoutError::Timeout),
+        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        /// );
+        /// assert_eq!(
+        ///     Ok("hello world!"),
+        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        /// );
+        /// assert_eq!(
+        ///     Err(&RecvTimeoutError::Closed),
+        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        /// );
+        /// ```
+        pub fn recv_ref_timeout(&self, timeout: Duration) -> Result<RecvRef<'_, T>, RecvTimeoutError> {
+            recv_ref_timeout(self.core, self.slots, timeout)
+        }
+
+        /// Receives the next message for this receiver, **by value**, waiting for at most `timeout`.
+        /// Returns an error if the corresponding channel has hung up, or if it waits more than `timeout`.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{blocking::StaticChannel, errors::RecvTimeoutError};
+        /// use std::{thread, time::Duration};
+        ///
+        /// static CHANNEL: StaticChannel<i32, 100> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// thread::spawn(move || {
+        ///    thread::sleep(Duration::from_millis(150));
+        ///    tx.send(1).unwrap();
+        /// });
+        ///
+        /// assert_eq!(
+        ///     Err(RecvTimeoutError::Timeout),
+        ///     rx.recv_timeout(Duration::from_millis(100))
+        /// );
+        /// assert_eq!(
+        ///     Ok(1),
+        ///     rx.recv_timeout(Duration::from_millis(100))
+        /// );
+        /// assert_eq!(
+        ///     Err(RecvTimeoutError::Closed),
+        ///     rx.recv_timeout(Duration::from_millis(100))
+        /// );
+        /// ```
+        pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError>
+        where
+            R: Recycle<T>,
+        {
+            let mut val = self.recv_ref_timeout(timeout)?;
+            Ok(recycling::take(&mut *val, self.recycle))
+        }
+
         /// Attempts to receive the next message for this receiver by reference
         /// without blocking.
         ///
@@ -1033,6 +1108,78 @@ impl<T, R> Receiver<T, R> {
         Some(recycling::take(&mut *val, &self.inner.recycle))
     }
 
+    /// Receives the next message for this receiver, **by reference**, waiting for at most `timeout`.
+    /// Returns an error if the corresponding channel has hung up, or if it waits more than `timeout`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::{blocking, errors::RecvTimeoutError};
+    /// use std::{thread, fmt::Write, time::Duration};
+    ///
+    /// let (tx, rx) = blocking::channel::<String>(100);
+    ///
+    /// thread::spawn(move || {
+    ///     thread::sleep(Duration::from_millis(150));
+    ///     let mut value = tx.send_ref().unwrap();
+    ///     write!(value, "hello world!")
+    ///         .expect("writing to a `String` should never fail");
+    /// });
+    ///
+    /// assert_eq!(
+    ///     Err(&RecvTimeoutError::Timeout),
+    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    /// );
+    /// assert_eq!(
+    ///     Ok("hello world!"),
+    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    /// );
+    /// assert_eq!(
+    ///     Err(&RecvTimeoutError::Closed),
+    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    /// );
+    /// ```
+    pub fn recv_ref_timeout(&self, timeout: Duration) -> Result<RecvRef<'_, T>, RecvTimeoutError> {
+        recv_ref_timeout(&self.inner.core, self.inner.slots.as_ref(), timeout)
+    }
+
+    /// Receives the next message for this receiver, **by value**, waiting for at most `timeout`.
+    /// Returns an error if the corresponding channel has hung up, or if it waits more than `timeout`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::{blocking, errors::RecvTimeoutError};
+    /// use std::{thread, fmt::Write, time::Duration};
+    ///
+    /// let (tx, rx) = blocking::channel(100);
+    ///
+    /// thread::spawn(move || {
+    ///    thread::sleep(Duration::from_millis(150));
+    ///    tx.send(1).unwrap();
+    /// });
+    ///
+    /// assert_eq!(
+    ///     Err(RecvTimeoutError::Timeout),
+    ///     rx.recv_timeout(Duration::from_millis(100))
+    /// );
+    /// assert_eq!(
+    ///     Ok(1),
+    ///     rx.recv_timeout(Duration::from_millis(100))
+    /// );
+    /// assert_eq!(
+    ///     Err(RecvTimeoutError::Closed),
+    ///     rx.recv_timeout(Duration::from_millis(100))
+    /// );
+    /// ```
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError>
+    where
+        R: Recycle<T>,
+    {
+        let mut val = self.recv_ref_timeout(timeout)?;
+        Ok(recycling::take(&mut *val, &self.inner.recycle))
+    }
+
     /// Attempts to receive the next message for this receiver by reference
     /// without blocking.
     ///
@@ -1160,6 +1307,37 @@ fn recv_ref<'a, T>(core: &'a ChannelCore<Thread>, slots: &'a [Slot<T>]) -> Optio
             Poll::Pending => {
                 test_println!("parking ({:?})", thread::current());
                 thread::park();
+            }
+        }
+    }
+}
+
+#[inline]
+fn recv_ref_timeout<'a, T>(
+    core: &'a ChannelCore<Thread>,
+    slots: &'a [Slot<T>],
+    timeout: Duration,
+) -> Result<RecvRef<'a, T>, RecvTimeoutError> {
+    let beginning_park = Instant::now();
+    loop {
+        match core.poll_recv_ref(slots, thread::current) {
+            Poll::Ready(r) => {
+                return r
+                    .map(|slot| {
+                        RecvRef(RecvRefInner {
+                            _notify: super::NotifyTx(&core.tx_wait),
+                            slot,
+                        })
+                    })
+                    .ok_or(RecvTimeoutError::Closed);
+            }
+            Poll::Pending => {
+                test_println!("park_timeout ({:?})", thread::current());
+                thread::park_timeout(timeout);
+                let elapsed = beginning_park.elapsed();
+                if elapsed >= timeout {
+                    return Err(RecvTimeoutError::Timeout);
+                }
             }
         }
     }
