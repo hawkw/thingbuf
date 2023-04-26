@@ -387,7 +387,7 @@ where
     /// [`push`]: Self::push_ref
     pub fn push_ref(&self) -> Result<Ref<'_, T>, Full> {
         self.core
-            .push_ref(&*self.slots, &self.recycle)
+            .push_ref(&self.slots, &self.recycle)
             .map_err(|e| match e {
                 crate::mpsc::errors::TrySendError::Full(()) => Full(()),
                 _ => unreachable!(),
@@ -459,7 +459,7 @@ where
     /// [`push`]: Self::push
     /// [`pop`]: Self::pop
     pub fn pop_ref(&self) -> Option<Ref<'_, T>> {
-        self.core.pop_ref(&*self.slots).ok()
+        self.core.pop_ref(&self.slots).ok()
     }
 
     /// Dequeue the first element in the queue *by value*, moving it out of the

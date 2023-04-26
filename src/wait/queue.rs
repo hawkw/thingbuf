@@ -626,7 +626,7 @@ impl<T> List<T> {
     }
 
     fn is_empty(&self) -> bool {
-        self.head == None && self.tail == None
+        self.head.is_none() && self.tail.is_none()
     }
 }
 
@@ -658,7 +658,7 @@ mod tests {
             self.0.store(true, Ordering::SeqCst);
         }
 
-        fn same(&self, &Self(ref other): &Self) -> bool {
+        fn same(&self, Self(other): &Self) -> bool {
             Arc::ptr_eq(&self.0, other)
         }
     }
