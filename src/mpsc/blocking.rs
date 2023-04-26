@@ -576,8 +576,16 @@ feature! {
         }
 
         /// Receives the next message for this receiver, **by reference**, waiting for at most `timeout`.
-        /// Returns an error if the corresponding channel has hung up, or if it waits more than `timeout`.
         ///
+        /// If there are no messages in the channel's buffer, but the channel has
+        /// not yet been closed, this method will block until a message is sent,
+        /// the channel is closed, or the provided `timeout` has elapsed.
+        ///
+        /// # Returns
+        ///
+        /// - [`Ok`]`(`[`RecvRef`]`<T>)` if a message was received.
+        /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
+        /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
         /// # Examples
         ///
         /// ```
@@ -612,8 +620,28 @@ feature! {
         }
 
         /// Receives the next message for this receiver, **by value**, waiting for at most `timeout`.
-        /// Returns an error if the corresponding channel has hung up, or if it waits more than `timeout`.
         ///
+        /// If there are no messages in the channel's buffer, but the channel
+        /// has not yet been closed, this method will block until a message is
+        /// sent, the channel is closed, or the provided `timeout` has elapsed.
+        ///
+        /// When a message is received, it is moved out of the channel by value,
+        /// and replaced with a new slot according to the configured [recycling
+        /// policy]. If all [`StaticSender`]s for this channel write to the
+        /// channel's slots in place by using the [`send_ref`] or
+        /// [`try_send_ref`] methods, consider using the [`recv_timeout_ref`]
+        /// method instead, to enable the reuse of heap allocations.
+        ///
+        /// [`send_ref`]: StaticSender::send_ref
+        /// [`try_send_ref`]: StaticSender::try_send_ref
+        /// [recycling policy]: crate::recycling::Recycle
+        /// [`recv_timeout_ref`]: Self::recv_timeout_ref
+        ///
+        /// # Returns
+        ///
+        /// - [`Ok`]`(<T>)` if a message was received.
+        /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
+        /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
         /// # Examples
         ///
         /// ```
@@ -1109,8 +1137,16 @@ impl<T, R> Receiver<T, R> {
     }
 
     /// Receives the next message for this receiver, **by reference**, waiting for at most `timeout`.
-    /// Returns an error if the corresponding channel has hung up, or if it waits more than `timeout`.
     ///
+    /// If there are no messages in the channel's buffer, but the channel has
+    /// not yet been closed, this method will block until a message is sent,
+    /// the channel is closed, or the provided `timeout` has elapsed.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`RecvRef`]`<T>)` if a message was received.
+    /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
+    /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
     /// # Examples
     ///
     /// ```
@@ -1144,7 +1180,28 @@ impl<T, R> Receiver<T, R> {
     }
 
     /// Receives the next message for this receiver, **by value**, waiting for at most `timeout`.
-    /// Returns an error if the corresponding channel has hung up, or if it waits more than `timeout`.
+        ///
+        /// If there are no messages in the channel's buffer, but the channel
+        /// has not yet been closed, this method will block until a message is
+        /// sent, the channel is closed, or the provided `timeout` has elapsed.
+        ///
+        /// When a message is received, it is moved out of the channel by value,
+        /// and replaced with a new slot according to the configured [recycling
+        /// policy]. If all [`Sender`]s for this channel write to the
+        /// channel's slots in place by using the [`send_ref`] or
+        /// [`try_send_ref`] methods, consider using the [`recv_timeout_ref`]
+        /// method instead, to enable the reuse of heap allocations.
+        ///
+        /// [`send_ref`]: Sender::send_ref
+        /// [`try_send_ref`]: Sender::try_send_ref
+        /// [recycling policy]: crate::recycling::Recycle
+        /// [`recv_timeout_ref`]: Self::recv_timeout_ref
+        ///
+        /// # Returns
+        ///
+        /// - [`Ok`]`(<T>)` if a message was received.
+        /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
+        /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
     ///
     /// # Examples
     ///
