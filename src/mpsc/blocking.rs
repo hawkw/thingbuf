@@ -615,6 +615,7 @@ feature! {
         ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
         /// );
         /// ```
+        #[cfg(not(all(test, loom)))]
         pub fn recv_ref_timeout(&self, timeout: Duration) -> Result<RecvRef<'_, T>, RecvTimeoutError> {
             recv_ref_timeout(self.core, self.slots, timeout)
         }
@@ -669,6 +670,7 @@ feature! {
         ///     rx.recv_timeout(Duration::from_millis(100))
         /// );
         /// ```
+        #[cfg(not(all(test, loom)))]
         pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError>
         where
             R: Recycle<T>,
@@ -1175,6 +1177,7 @@ impl<T, R> Receiver<T, R> {
     ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
     /// );
     /// ```
+    #[cfg(not(all(test, loom)))]
     pub fn recv_ref_timeout(&self, timeout: Duration) -> Result<RecvRef<'_, T>, RecvTimeoutError> {
         recv_ref_timeout(&self.inner.core, self.inner.slots.as_ref(), timeout)
     }
@@ -1229,6 +1232,7 @@ impl<T, R> Receiver<T, R> {
     ///     rx.recv_timeout(Duration::from_millis(100))
     /// );
     /// ```
+    #[cfg(not(all(test, loom)))]
     pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError>
     where
         R: Recycle<T>,
@@ -1369,6 +1373,7 @@ fn recv_ref<'a, T>(core: &'a ChannelCore<Thread>, slots: &'a [Slot<T>]) -> Optio
     }
 }
 
+#[cfg(not(all(test, loom)))]
 #[inline]
 fn recv_ref_timeout<'a, T>(
     core: &'a ChannelCore<Thread>,
