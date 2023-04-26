@@ -16,6 +16,7 @@ use crate::{
 };
 use core::{fmt, pin::Pin};
 use errors::*;
+use std::time::{Duration, Instant};
 
 /// Returns a new synchronous multi-producer, single consumer (MPSC)
 /// channel with  the provided capacity.
@@ -696,6 +697,110 @@ feature! {
         {
             let mut val = self.recv_ref()?;
             Some(recycling::take(&mut *val, self.recycle))
+        }
+
+        /// Receives the next message for this receiver, **by reference**, waiting for at most `timeout`.
+        ///
+        /// If there are no messages in the channel's buffer, but the channel has
+        /// not yet been closed, this method will block until a message is sent,
+        /// the channel is closed, or the provided `timeout` has elapsed.
+        ///
+        /// # Returns
+        ///
+        /// - [`Ok`]`(`[`RecvRef`]`<T>)` if a message was received.
+        /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
+        /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{blocking::StaticChannel, errors::RecvTimeoutError};
+        /// use std::{thread, fmt::Write, time::Duration};
+        ///
+        /// static CHANNEL: StaticChannel<String, 100> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// thread::spawn(move || {
+        ///     thread::sleep(Duration::from_millis(150));
+        ///     let mut value = tx.send_ref().unwrap();
+        ///     write!(value, "hello world!")
+        ///         .expect("writing to a `String` should never fail");
+        /// });
+        ///
+        /// assert_eq!(
+        ///     Err(&RecvTimeoutError::Timeout),
+        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        /// );
+        /// assert_eq!(
+        ///     Ok("hello world!"),
+        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        /// );
+        /// assert_eq!(
+        ///     Err(&RecvTimeoutError::Closed),
+        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        /// );
+        /// ```
+        #[cfg(not(all(test, loom)))]
+        pub fn recv_ref_timeout(&self, timeout: Duration) -> Result<RecvRef<'_, T>, RecvTimeoutError> {
+            recv_ref_timeout(self.core, self.slots, timeout)
+        }
+
+        /// Receives the next message for this receiver, **by value**, waiting for at most `timeout`.
+        ///
+        /// If there are no messages in the channel's buffer, but the channel
+        /// has not yet been closed, this method will block until a message is
+        /// sent, the channel is closed, or the provided `timeout` has elapsed.
+        ///
+        /// When a message is received, it is moved out of the channel by value,
+        /// and replaced with a new slot according to the configured [recycling
+        /// policy]. If all [`StaticSender`]s for this channel write to the
+        /// channel's slots in place by using the [`send_ref`] or
+        /// [`try_send_ref`] methods, consider using the [`recv_ref_timeout`]
+        /// method instead, to enable the reuse of heap allocations.
+        ///
+        /// [`send_ref`]: StaticSender::send_ref
+        /// [`try_send_ref`]: StaticSender::try_send_ref
+        /// [recycling policy]: crate::recycling::Recycle
+        /// [`recv_ref_timeout`]: Self::recv_ref_timeout
+        ///
+        /// # Returns
+        ///
+        /// - [`Ok`]`(<T>)` if a message was received.
+        /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
+        /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{blocking::StaticChannel, errors::RecvTimeoutError};
+        /// use std::{thread, time::Duration};
+        ///
+        /// static CHANNEL: StaticChannel<i32, 100> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// thread::spawn(move || {
+        ///    thread::sleep(Duration::from_millis(150));
+        ///    tx.send(1).unwrap();
+        /// });
+        ///
+        /// assert_eq!(
+        ///     Err(RecvTimeoutError::Timeout),
+        ///     rx.recv_timeout(Duration::from_millis(100))
+        /// );
+        /// assert_eq!(
+        ///     Ok(1),
+        ///     rx.recv_timeout(Duration::from_millis(100))
+        /// );
+        /// assert_eq!(
+        ///     Err(RecvTimeoutError::Closed),
+        ///     rx.recv_timeout(Duration::from_millis(100))
+        /// );
+        /// ```
+        #[cfg(not(all(test, loom)))]
+        pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError>
+        where
+            R: Recycle<T>,
+        {
+            let mut val = self.recv_ref_timeout(timeout)?;
+            Ok(recycling::take(&mut *val, self.recycle))
         }
 
         /// Attempts to receive the next message for this receiver by reference
@@ -1393,6 +1498,109 @@ impl<T, R> Receiver<T, R> {
         Some(recycling::take(&mut *val, &self.inner.recycle))
     }
 
+    /// Receives the next message for this receiver, **by reference**, waiting for at most `timeout`.
+    ///
+    /// If there are no messages in the channel's buffer, but the channel has
+    /// not yet been closed, this method will block until a message is sent,
+    /// the channel is closed, or the provided `timeout` has elapsed.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`RecvRef`]`<T>)` if a message was received.
+    /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
+    /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::{blocking, errors::RecvTimeoutError};
+    /// use std::{thread, fmt::Write, time::Duration};
+    ///
+    /// let (tx, rx) = blocking::channel::<String>(100);
+    ///
+    /// thread::spawn(move || {
+    ///     thread::sleep(Duration::from_millis(150));
+    ///     let mut value = tx.send_ref().unwrap();
+    ///     write!(value, "hello world!")
+    ///         .expect("writing to a `String` should never fail");
+    /// });
+    ///
+    /// assert_eq!(
+    ///     Err(&RecvTimeoutError::Timeout),
+    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    /// );
+    /// assert_eq!(
+    ///     Ok("hello world!"),
+    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    /// );
+    /// assert_eq!(
+    ///     Err(&RecvTimeoutError::Closed),
+    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    /// );
+    /// ```
+    #[cfg(not(all(test, loom)))]
+    pub fn recv_ref_timeout(&self, timeout: Duration) -> Result<RecvRef<'_, T>, RecvTimeoutError> {
+        recv_ref_timeout(&self.inner.core, self.inner.slots.as_ref(), timeout)
+    }
+
+    /// Receives the next message for this receiver, **by value**, waiting for at most `timeout`.
+    ///
+    /// If there are no messages in the channel's buffer, but the channel
+    /// has not yet been closed, this method will block until a message is
+    /// sent, the channel is closed, or the provided `timeout` has elapsed.
+    ///
+    /// When a message is received, it is moved out of the channel by value,
+    /// and replaced with a new slot according to the configured [recycling
+    /// policy]. If all [`Sender`]s for this channel write to the
+    /// channel's slots in place by using the [`send_ref`] or
+    /// [`try_send_ref`] methods, consider using the [`recv_ref_timeout`]
+    /// method instead, to enable the reuse of heap allocations.
+    ///
+    /// [`send_ref`]: Sender::send_ref
+    /// [`try_send_ref`]: Sender::try_send_ref
+    /// [recycling policy]: crate::recycling::Recycle
+    /// [`recv_ref_timeout`]: Self::recv_ref_timeout
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(<T>)` if a message was received.
+    /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
+    /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::{blocking, errors::RecvTimeoutError};
+    /// use std::{thread, fmt::Write, time::Duration};
+    ///
+    /// let (tx, rx) = blocking::channel(100);
+    ///
+    /// thread::spawn(move || {
+    ///    thread::sleep(Duration::from_millis(150));
+    ///    tx.send(1).unwrap();
+    /// });
+    ///
+    /// assert_eq!(
+    ///     Err(RecvTimeoutError::Timeout),
+    ///     rx.recv_timeout(Duration::from_millis(100))
+    /// );
+    /// assert_eq!(
+    ///     Ok(1),
+    ///     rx.recv_timeout(Duration::from_millis(100))
+    /// );
+    /// assert_eq!(
+    ///     Err(RecvTimeoutError::Closed),
+    ///     rx.recv_timeout(Duration::from_millis(100))
+    /// );
+    /// ```
+    #[cfg(not(all(test, loom)))]
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError>
+    where
+        R: Recycle<T>,
+    {
+        let mut val = self.recv_ref_timeout(timeout)?;
+        Ok(recycling::take(&mut *val, &self.inner.recycle))
+    }
+
     /// Attempts to receive the next message for this receiver by reference
     /// without blocking.
     ///
@@ -1632,6 +1840,38 @@ fn recv_ref<'a, T>(core: &'a ChannelCore<Thread>, slots: &'a [Slot<T>]) -> Optio
             Poll::Pending => {
                 test_println!("parking ({:?})", thread::current());
                 thread::park();
+            }
+        }
+    }
+}
+
+#[cfg(not(all(test, loom)))]
+#[inline]
+fn recv_ref_timeout<'a, T>(
+    core: &'a ChannelCore<Thread>,
+    slots: &'a [Slot<T>],
+    timeout: Duration,
+) -> Result<RecvRef<'a, T>, RecvTimeoutError> {
+    let beginning_park = Instant::now();
+    loop {
+        match core.poll_recv_ref(slots, thread::current) {
+            Poll::Ready(r) => {
+                return r
+                    .map(|slot| {
+                        RecvRef(RecvRefInner {
+                            _notify: super::NotifyTx(&core.tx_wait),
+                            slot,
+                        })
+                    })
+                    .ok_or(RecvTimeoutError::Closed);
+            }
+            Poll::Pending => {
+                test_println!("park_timeout ({:?})", thread::current());
+                thread::park_timeout(timeout);
+                let elapsed = beginning_park.elapsed();
+                if elapsed >= timeout {
+                    return Err(RecvTimeoutError::Timeout);
+                }
             }
         }
     }
