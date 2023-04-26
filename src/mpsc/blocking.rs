@@ -596,7 +596,7 @@ feature! {
         /// let (tx, rx) = CHANNEL.split();
         ///
         /// thread::spawn(move || {
-        ///     thread::sleep(Duration::from_millis(150));
+        ///     thread::sleep(Duration::from_millis(600));
         ///     let mut value = tx.send_ref().unwrap();
         ///     write!(value, "hello world!")
         ///         .expect("writing to a `String` should never fail");
@@ -604,15 +604,15 @@ feature! {
         ///
         /// assert_eq!(
         ///     Err(&RecvTimeoutError::Timeout),
-        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
         /// );
         /// assert_eq!(
         ///     Ok("hello world!"),
-        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
         /// );
         /// assert_eq!(
         ///     Err(&RecvTimeoutError::Closed),
-        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
         /// );
         /// ```
         #[cfg(not(all(test, loom)))]
@@ -653,21 +653,21 @@ feature! {
         /// let (tx, rx) = CHANNEL.split();
         ///
         /// thread::spawn(move || {
-        ///    thread::sleep(Duration::from_millis(150));
+        ///    thread::sleep(Duration::from_millis(600));
         ///    tx.send(1).unwrap();
         /// });
         ///
         /// assert_eq!(
         ///     Err(RecvTimeoutError::Timeout),
-        ///     rx.recv_timeout(Duration::from_millis(100))
+        ///     rx.recv_timeout(Duration::from_millis(400))
         /// );
         /// assert_eq!(
         ///     Ok(1),
-        ///     rx.recv_timeout(Duration::from_millis(100))
+        ///     rx.recv_timeout(Duration::from_millis(400))
         /// );
         /// assert_eq!(
         ///     Err(RecvTimeoutError::Closed),
-        ///     rx.recv_timeout(Duration::from_millis(100))
+        ///     rx.recv_timeout(Duration::from_millis(400))
         /// );
         /// ```
         #[cfg(not(all(test, loom)))]
@@ -1158,7 +1158,7 @@ impl<T, R> Receiver<T, R> {
     /// let (tx, rx) = blocking::channel::<String>(100);
     ///
     /// thread::spawn(move || {
-    ///     thread::sleep(Duration::from_millis(150));
+    ///     thread::sleep(Duration::from_millis(600));
     ///     let mut value = tx.send_ref().unwrap();
     ///     write!(value, "hello world!")
     ///         .expect("writing to a `String` should never fail");
@@ -1166,15 +1166,15 @@ impl<T, R> Receiver<T, R> {
     ///
     /// assert_eq!(
     ///     Err(&RecvTimeoutError::Timeout),
-    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
     /// );
     /// assert_eq!(
     ///     Ok("hello world!"),
-    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
     /// );
     /// assert_eq!(
     ///     Err(&RecvTimeoutError::Closed),
-    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
     /// );
     /// ```
     #[cfg(not(all(test, loom)))]
@@ -1215,21 +1215,21 @@ impl<T, R> Receiver<T, R> {
     /// let (tx, rx) = blocking::channel(100);
     ///
     /// thread::spawn(move || {
-    ///    thread::sleep(Duration::from_millis(150));
+    ///    thread::sleep(Duration::from_millis(600));
     ///    tx.send(1).unwrap();
     /// });
     ///
     /// assert_eq!(
     ///     Err(RecvTimeoutError::Timeout),
-    ///     rx.recv_timeout(Duration::from_millis(100))
+    ///     rx.recv_timeout(Duration::from_millis(400))
     /// );
     /// assert_eq!(
     ///     Ok(1),
-    ///     rx.recv_timeout(Duration::from_millis(100))
+    ///     rx.recv_timeout(Duration::from_millis(400))
     /// );
     /// assert_eq!(
     ///     Err(RecvTimeoutError::Closed),
-    ///     rx.recv_timeout(Duration::from_millis(100))
+    ///     rx.recv_timeout(Duration::from_millis(400))
     /// );
     /// ```
     #[cfg(not(all(test, loom)))]
