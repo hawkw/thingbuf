@@ -73,10 +73,8 @@ some cases where you might be better off considering other options:
   prefer a channel implementation that only allocates memory for messages as
   it's needed (such as [`tokio::sync::mpsc`]).
 
-- **You need a blocking channel with `send_timeout`** or **a blocking channel
-  with a `select` operation**. I'm probably not going to implement these things.
-  The blocking channel isn't particularly important to me compared to the async
-  channel, and I _probably_ won't add a bunch of additional APIs to it.
+- **You need a blocking channel with a `select` operation**.
+  I'm probably not going to implement it. I _may_ accept a PR if you raise it.
 
   If you need a synchronous channel with this kind of functionality,
   [`crossbeam-channel`] is probably a good choice.
