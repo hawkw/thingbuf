@@ -120,7 +120,10 @@ impl SendTimeoutError {
             Self::Closed(()) => SendTimeoutError::Closed(value),
         }
     }
+}
 
+#[cfg(feature = "std")]
+impl<T> SendTimeoutError<T> {
     /// Returns `true` if this error was returned because the channel is still
     /// full after the timeout has elapsed.
     pub fn is_timeout(&self) -> bool {
