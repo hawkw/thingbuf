@@ -351,6 +351,124 @@ feature! {
             }
         }
 
+        /// Reserves a slot in the channel to mutate in place, blocking until
+        /// there is a free slot to write to, waiting for at most `timeout`.
+        ///
+        /// This is similar to the [`send_timeout`] method, but, rather than taking a
+        /// message by value to write to the channel, this method reserves a
+        /// writable slot in the channel, and returns a [`SendRef`] that allows
+        /// mutating the slot in place. If the [`StaticReceiver`] end of the
+        /// channel uses the [`StaticReceiver::recv_ref`] method for receiving
+        /// from the channel, this allows allocations for channel messages to be
+        /// reused in place.
+        ///
+        /// # Errors
+        ///
+        /// - [`Err`]`(`[`SendTimeoutError::Timeout`]`)` if the timeout has elapsed.
+        /// - [`Err`]`(`[`SendTimeoutError::Closed`]`)` if the channel has closed.
+        ///
+        /// # Examples
+        ///
+        /// Sending formatted strings by writing them directly to channel slots,
+        /// in place:
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{blocking::StaticChannel, errors::SendTimeoutError};
+        /// use std::{fmt::Write, time::Duration, thread};
+        ///
+        /// static CHANNEL: StaticChannel<String, 1> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// thread::spawn(move || {
+        ///     thread::sleep(Duration::from_millis(500));
+        ///     let msg = rx.recv_ref().unwrap();
+        ///     println!("{}", msg);
+        ///     thread::sleep(Duration::from_millis(500));
+        /// });
+        ///
+        /// thread::spawn(move || {
+        ///     let mut value = tx.send_ref_timeout(Duration::from_millis(200)).unwrap();
+        ///     write!(value, "hello").expect("writing to a `String` should never fail");
+        ///     thread::sleep(Duration::from_millis(400));
+        ///
+        ///     let mut value = tx.send_ref_timeout(Duration::from_millis(200)).unwrap();
+        ///     write!(value, "world").expect("writing to a `String` should never fail");
+        ///     thread::sleep(Duration::from_millis(400));
+        ///
+        ///     assert_eq!(
+        ///         Err(&SendTimeoutError::Timeout(())),
+        ///         tx.send_ref_timeout(Duration::from_millis(200)).as_deref().map(String::as_str)
+        ///     );
+        /// });
+        /// ```
+        ///
+        /// [`send_timeout`]: Self::send_timeout
+        #[cfg(not(all(test, loom)))]
+        pub fn send_ref_timeout(&self, timeout: Duration) -> Result<SendRef<'_, T>, SendTimeoutError> {
+            send_ref_timeout(self.core, self.slots, self.recycle, timeout)
+        }
+
+        /// Sends a message by value, blocking until there is a free slot to
+        /// write to, waiting for at most `timeout`.
+        ///
+        /// This method takes the message by value, and replaces any previous
+        /// value in the slot. This means that the channel will *not* function
+        /// as an object pool while sending messages with `send_timeout`. This method is
+        /// most appropriate when messages don't own reusable heap allocations,
+        /// or when the [`StaticReceiver`] end of the channel must receive messages
+        /// by moving them out of the channel by value (using the
+        /// [`StaticReceiver::recv`] method). When messages in the channel own
+        /// reusable heap allocations (such as `String`s or `Vec`s), and the
+        /// [`StaticReceiver`] doesn't need to receive them by value, consider using
+        /// [`send_ref_timeout`] instead, to enable allocation reuse.
+        ///
+        /// # Errors
+        ///
+        /// - [`Err`]`(`[`SendTimeoutError::Timeout`]`)` if the timeout has elapsed.
+        /// - [`Err`]`(`[`SendTimeoutError::Closed`]`)` if the channel has closed.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use thingbuf::mpsc::{blocking::StaticChannel, errors::SendTimeoutError};
+        /// use std::{time::Duration, thread};
+        ///
+        /// static CHANNEL: StaticChannel<i32, 1> = StaticChannel::new();
+        /// let (tx, rx) = CHANNEL.split();
+        ///
+        /// thread::spawn(move || {
+        ///     thread::sleep(Duration::from_millis(500));
+        ///     let msg = rx.recv().unwrap();
+        ///     println!("{}", msg);
+        ///     thread::sleep(Duration::from_millis(500));
+        /// });
+        ///
+        /// thread::spawn(move || {
+        ///     tx.send_timeout(1, Duration::from_millis(200)).unwrap();
+        ///     thread::sleep(Duration::from_millis(400));
+        ///
+        ///     tx.send_timeout(2, Duration::from_millis(200)).unwrap();
+        ///     thread::sleep(Duration::from_millis(400));
+        ///
+        ///     assert_eq!(
+        ///         Err(SendTimeoutError::Timeout(3)),
+        ///         tx.send_timeout(3, Duration::from_millis(200))
+        ///     );
+        /// });
+        /// ```
+        ///
+        /// [`send_ref_timeout`]: Self::send_ref_timeout
+        #[cfg(not(all(test, loom)))]
+        pub fn send_timeout(&self, val: T, timeout: Duration) -> Result<(), SendTimeoutError<T>> {
+            match self.send_ref_timeout(timeout) {
+                Err(e) => Err(e.with_value(val)),
+                Ok(mut slot) => {
+                    *slot = val;
+                    Ok(())
+                }
+            }
+        }
+
         /// Attempts to reserve a slot in the channel to mutate in place,
         /// without blocking until capacity is available.
         ///
@@ -710,6 +828,7 @@ feature! {
         /// - [`Ok`]`(`[`RecvRef`]`<T>)` if a message was received.
         /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
         /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
+        ///
         /// # Examples
         ///
         /// ```
@@ -720,7 +839,7 @@ feature! {
         /// let (tx, rx) = CHANNEL.split();
         ///
         /// thread::spawn(move || {
-        ///     thread::sleep(Duration::from_millis(150));
+        ///     thread::sleep(Duration::from_millis(600));
         ///     let mut value = tx.send_ref().unwrap();
         ///     write!(value, "hello world!")
         ///         .expect("writing to a `String` should never fail");
@@ -728,15 +847,15 @@ feature! {
         ///
         /// assert_eq!(
         ///     Err(&RecvTimeoutError::Timeout),
-        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
         /// );
         /// assert_eq!(
         ///     Ok("hello world!"),
-        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
         /// );
         /// assert_eq!(
         ///     Err(&RecvTimeoutError::Closed),
-        ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+        ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
         /// );
         /// ```
         #[cfg(not(all(test, loom)))]
@@ -767,6 +886,7 @@ feature! {
         /// - [`Ok`]`(<T>)` if a message was received.
         /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
         /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
+        ///
         /// # Examples
         ///
         /// ```
@@ -777,21 +897,21 @@ feature! {
         /// let (tx, rx) = CHANNEL.split();
         ///
         /// thread::spawn(move || {
-        ///    thread::sleep(Duration::from_millis(150));
+        ///    thread::sleep(Duration::from_millis(600));
         ///    tx.send(1).unwrap();
         /// });
         ///
         /// assert_eq!(
         ///     Err(RecvTimeoutError::Timeout),
-        ///     rx.recv_timeout(Duration::from_millis(100))
+        ///     rx.recv_timeout(Duration::from_millis(400))
         /// );
         /// assert_eq!(
         ///     Ok(1),
-        ///     rx.recv_timeout(Duration::from_millis(100))
+        ///     rx.recv_timeout(Duration::from_millis(400))
         /// );
         /// assert_eq!(
         ///     Err(RecvTimeoutError::Closed),
-        ///     rx.recv_timeout(Duration::from_millis(100))
+        ///     rx.recv_timeout(Duration::from_millis(400))
         /// );
         /// ```
         #[cfg(not(all(test, loom)))]
@@ -1174,6 +1294,127 @@ where
         }
     }
 
+    /// Reserves a slot in the channel to mutate in place, blocking until
+    /// there is a free slot to write to, waiting for at most `timeout`.
+    ///
+    /// This is similar to the [`send_timeout`] method, but, rather than taking a
+    /// message by value to write to the channel, this method reserves a
+    /// writable slot in the channel, and returns a [`SendRef`] that allows
+    /// mutating the slot in place. If the [`Receiver`] end of the channel
+    /// uses the [`Receiver::recv_ref`] method for receiving from the channel,
+    /// this allows allocations for channel messages to be reused in place.
+    ///
+    /// # Errors
+    ///
+    /// - [`Err`]`(`[`SendTimeoutError::Timeout`]`)` if the timeout has elapsed.
+    /// - [`Err`]`(`[`SendTimeoutError::Closed`]`)` if the channel has closed.
+    ///
+    /// # Examples
+    ///
+    /// Sending formatted strings by writing them directly to channel slots,
+    /// in place:
+    ///
+    /// ```
+    /// use thingbuf::mpsc::{blocking, errors::SendTimeoutError};
+    /// use std::{fmt::Write, time::Duration, thread};
+    ///
+    /// let (tx, rx) = blocking::channel::<String>(1);
+    ///
+    /// thread::spawn(move || {
+    ///     thread::sleep(Duration::from_millis(500));
+    ///     let msg = rx.recv_ref().unwrap();
+    ///     println!("{}", msg);
+    ///     thread::sleep(Duration::from_millis(500));
+    /// });
+    ///
+    /// thread::spawn(move || {
+    ///     let mut value = tx.send_ref_timeout(Duration::from_millis(200)).unwrap();
+    ///     write!(value, "hello").expect("writing to a `String` should never fail");
+    ///     thread::sleep(Duration::from_millis(400));
+    ///
+    ///     let mut value = tx.send_ref_timeout(Duration::from_millis(200)).unwrap();
+    ///     write!(value, "world").expect("writing to a `String` should never fail");
+    ///     thread::sleep(Duration::from_millis(400));
+    ///
+    ///     assert_eq!(
+    ///         Err(&SendTimeoutError::Timeout(())),
+    ///         tx.send_ref_timeout(Duration::from_millis(200)).as_deref().map(String::as_str)
+    ///     );
+    /// });
+    /// ```
+    ///
+    /// [`send_timeout`]: Self::send_timeout
+    #[cfg(not(all(test, loom)))]
+    pub fn send_ref_timeout(&self, timeout: Duration) -> Result<SendRef<'_, T>, SendTimeoutError> {
+        send_ref_timeout(
+            &self.inner.core,
+            self.inner.slots.as_ref(),
+            &self.inner.recycle,
+            timeout,
+        )
+    }
+
+    /// Sends a message by value, blocking until there is a free slot to
+    /// write to, for at most `timeout`.
+    ///
+    /// This method takes the message by value, and replaces any previous
+    /// value in the slot. This means that the channel will *not* function
+    /// as an object pool while sending messages with `send_timeout`. This method is
+    /// most appropriate when messages don't own reusable heap allocations,
+    /// or when the [`Receiver`] end of the channel must receive messages by
+    /// moving them out of the channel by value (using the
+    /// [`Receiver::recv`] method). When messages in the channel own
+    /// reusable heap allocations (such as `String`s or `Vec`s), and the
+    /// [`Receiver`] doesn't need to receive them by value, consider using
+    /// [`send_ref_timeout`] instead, to enable allocation reuse.
+    ///
+    ///
+    /// # Errors
+    ///
+    /// - [`Err`]`(`[`SendTimeoutError::Timeout`]`)` if the timeout has elapsed.
+    /// - [`Err`]`(`[`SendTimeoutError::Closed`]`)` if the channel has closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thingbuf::mpsc::{blocking, errors::SendTimeoutError};
+    /// use std::{time::Duration, thread};
+    ///
+    /// let (tx, rx) = blocking::channel(1);
+    ///
+    /// thread::spawn(move || {
+    ///     thread::sleep(Duration::from_millis(500));
+    ///     let msg = rx.recv().unwrap();
+    ///     println!("{}", msg);
+    ///     thread::sleep(Duration::from_millis(500));
+    /// });
+    ///
+    /// thread::spawn(move || {
+    ///     tx.send_timeout(1, Duration::from_millis(200)).unwrap();
+    ///     thread::sleep(Duration::from_millis(400));
+    ///
+    ///     tx.send_timeout(2, Duration::from_millis(200)).unwrap();
+    ///     thread::sleep(Duration::from_millis(400));
+    ///
+    ///     assert_eq!(
+    ///         Err(SendTimeoutError::Timeout(3)),
+    ///         tx.send_timeout(3, Duration::from_millis(200))
+    ///     );
+    /// });
+    /// ```
+    ///
+    /// [`send_ref_timeout`]: Self::send_ref_timeout
+    #[cfg(not(all(test, loom)))]
+    pub fn send_timeout(&self, val: T, timeout: Duration) -> Result<(), SendTimeoutError<T>> {
+        match self.send_ref_timeout(timeout) {
+            Err(e) => Err(e.with_value(val)),
+            Ok(mut slot) => {
+                *slot = val;
+                Ok(())
+            }
+        }
+    }
+
     /// Attempts to reserve a slot in the channel to mutate in place,
     /// without blocking until capacity is available.
     ///
@@ -1509,6 +1750,7 @@ impl<T, R> Receiver<T, R> {
     /// - [`Ok`]`(`[`RecvRef`]`<T>)` if a message was received.
     /// - [`Err`]`(`[`RecvTimeoutError::Timeout`]`)` if the timeout has elapsed.
     /// - [`Err`]`(`[`RecvTimeoutError::Closed`]`)` if the channel has closed.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1518,7 +1760,7 @@ impl<T, R> Receiver<T, R> {
     /// let (tx, rx) = blocking::channel::<String>(100);
     ///
     /// thread::spawn(move || {
-    ///     thread::sleep(Duration::from_millis(150));
+    ///     thread::sleep(Duration::from_millis(600));
     ///     let mut value = tx.send_ref().unwrap();
     ///     write!(value, "hello world!")
     ///         .expect("writing to a `String` should never fail");
@@ -1526,15 +1768,15 @@ impl<T, R> Receiver<T, R> {
     ///
     /// assert_eq!(
     ///     Err(&RecvTimeoutError::Timeout),
-    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
     /// );
     /// assert_eq!(
     ///     Ok("hello world!"),
-    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
     /// );
     /// assert_eq!(
     ///     Err(&RecvTimeoutError::Closed),
-    ///     rx.recv_ref_timeout(Duration::from_millis(100)).as_deref().map(String::as_str)
+    ///     rx.recv_ref_timeout(Duration::from_millis(400)).as_deref().map(String::as_str)
     /// );
     /// ```
     #[cfg(not(all(test, loom)))]
@@ -1575,21 +1817,21 @@ impl<T, R> Receiver<T, R> {
     /// let (tx, rx) = blocking::channel(100);
     ///
     /// thread::spawn(move || {
-    ///    thread::sleep(Duration::from_millis(150));
+    ///    thread::sleep(Duration::from_millis(600));
     ///    tx.send(1).unwrap();
     /// });
     ///
     /// assert_eq!(
     ///     Err(RecvTimeoutError::Timeout),
-    ///     rx.recv_timeout(Duration::from_millis(100))
+    ///     rx.recv_timeout(Duration::from_millis(400))
     /// );
     /// assert_eq!(
     ///     Ok(1),
-    ///     rx.recv_timeout(Duration::from_millis(100))
+    ///     rx.recv_timeout(Duration::from_millis(400))
     /// );
     /// assert_eq!(
     ///     Err(RecvTimeoutError::Closed),
-    ///     rx.recv_timeout(Duration::from_millis(100))
+    ///     rx.recv_timeout(Duration::from_millis(400))
     /// );
     /// ```
     #[cfg(not(all(test, loom)))]
@@ -1922,6 +2164,63 @@ fn send_ref<'a, T, R: Recycle<T>>(
             WaitResult::Wait => {
                 unqueued = false;
                 thread::park();
+            }
+        }
+    }
+}
+
+#[cfg(not(all(test, loom)))]
+#[inline]
+fn send_ref_timeout<'a, T, R: Recycle<T>>(
+    core: &'a ChannelCore<Thread>,
+    slots: &'a [Slot<T>],
+    recycle: &'a R,
+    timeout: Duration,
+) -> Result<SendRef<'a, T>, SendTimeoutError> {
+    // fast path: avoid getting the thread and constructing the node if the
+    // slot is immediately ready.
+    match core.try_send_ref(slots, recycle) {
+        Ok(slot) => return Ok(SendRef(slot)),
+        Err(TrySendError::Closed(_)) => return Err(SendTimeoutError::Closed(())),
+        _ => {}
+    }
+
+    let mut waiter = queue::Waiter::new();
+    let mut unqueued = true;
+    let thread = thread::current();
+    let mut boff = Backoff::new();
+    let beginning_park = Instant::now();
+    loop {
+        let node = unsafe {
+            // Safety: in this case, it's totally safe to pin the waiter, as
+            // it is owned uniquely by this function, and it cannot possibly
+            // be moved while this thread is parked.
+            Pin::new_unchecked(&mut waiter)
+        };
+
+        let wait = if unqueued {
+            test_dbg!(core.tx_wait.start_wait(node, &thread))
+        } else {
+            test_dbg!(core.tx_wait.continue_wait(node, &thread))
+        };
+
+        match wait {
+            WaitResult::Closed => return Err(SendTimeoutError::Closed(())),
+            WaitResult::Notified => {
+                boff.spin_yield();
+                match core.try_send_ref(slots.as_ref(), recycle) {
+                    Ok(slot) => return Ok(SendRef(slot)),
+                    Err(TrySendError::Closed(_)) => return Err(SendTimeoutError::Closed(())),
+                    _ => {}
+                }
+            }
+            WaitResult::Wait => {
+                unqueued = false;
+                thread::park_timeout(timeout);
+                let elapsed = beginning_park.elapsed();
+                if elapsed >= timeout {
+                    return Err(SendTimeoutError::Timeout(()));
+                }
             }
         }
     }
