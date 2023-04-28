@@ -1156,7 +1156,7 @@ where
     /// });
     /// ```
     ///
-    /// [`send_ref`]: Self::send_ref
+    /// [`send_ref_timeout`]: Self::send_ref_timeout
     #[cfg(not(all(test, loom)))]
     pub fn send_timeout(&self, val: T, timeout: Duration) -> Result<(), SendTimeoutError<T>> {
         match self.send_ref_timeout(timeout) {

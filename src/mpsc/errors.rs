@@ -2,12 +2,13 @@
 use core::fmt;
 
 /// Error returned by the [`Sender::send_timeout`] or [`Sender::send_ref_timeout`] 
-/// (and [`StaticSender::send_timeout`]/[`StaticSender::send_ref_timeout`]) methods.
+/// (and [`StaticSender::send_timeout`]/[`StaticSender::send_ref_timeout`]) methods
+/// (blocking only).
 ///
-/// [`Sender::send_timeout`]: super::Sender::send_timeout
-/// [`Sender::send_ref_timeout`]: super::Sender::send_ref_timeout
-/// [`StaticSender::send_timeout`]: super::StaticSender::send_timeout
-/// [`StaticSender::send_ref_timeout`]: super::StaticSender::send_ref_timeout
+/// [`Sender::send_timeout`]: super::blocking::Sender::send_timeout
+/// [`Sender::send_ref_timeout`]: super::blocking::Sender::send_ref_timeout
+/// [`StaticSender::send_timeout`]: super::blocking::StaticSender::send_timeout
+/// [`StaticSender::send_ref_timeout`]: super::blocking::StaticSender::send_ref_timeout
 #[non_exhaustive]
 #[derive(PartialEq, Eq)]
 pub enum SendTimeoutError<T = ()> {
@@ -133,10 +134,10 @@ impl<T> SendTimeoutError<T> {
     /// If this returns `true`, no future [`try_send`] or [`send`] operation on
     /// this channel will succeed.
     ///
-    /// [`Receiver`]: super::Receiver
-    /// [`try_send`]: super::Sender::try_send
-    /// [`send`]: super::Sender::send
-    /// [`Receiver`]: super::Receiver
+    /// [`Receiver`]: super::blocking::Receiver
+    /// [`try_send`]: super::blocking::Sender::try_send
+    /// [`send`]: super::blocking::Sender::send
+    /// [`Receiver`]: super::blocking::Receiver
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Timeout(_))
     }
