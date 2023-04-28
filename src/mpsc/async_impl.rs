@@ -319,7 +319,6 @@ feature! {
         /// [`len`]: Self::len
         /// [`capacity`]: Self::capacity
         #[must_use]
-        #[must_use]
         pub fn remaining(&self) -> usize {
             self.capacity() - self.len()
         }
