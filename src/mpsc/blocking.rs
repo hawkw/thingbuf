@@ -569,7 +569,7 @@ feature! {
             self.core.core.capacity()
         }
 
-        /// Returns the unoccupied capacity of the channel for this [`Sender`]
+        /// Returns the unoccupied capacity of the channel for this [`StaticSender`]
         /// (i.e., how many additional elements can be sent before the channel
         /// will be full).
         ///
