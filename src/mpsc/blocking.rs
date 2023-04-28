@@ -354,7 +354,7 @@ feature! {
         /// Reserves a slot in the channel to mutate in place, blocking until
         /// there is a free slot to write to, waiting for at most `timeout`.
         ///
-        /// This is similar to the [`send`] method, but, rather than taking a
+        /// This is similar to the [`send_timeout`] method, but, rather than taking a
         /// message by value to write to the channel, this method reserves a
         /// writable slot in the channel, and returns a [`SendRef`] that allows
         /// mutating the slot in place. If the [`StaticReceiver`] end of the
@@ -402,7 +402,7 @@ feature! {
         /// });
         /// ```
         ///
-        /// [`send`]: Self::send
+        /// [`send_timeout`]: Self::send_timeout
         #[cfg(not(all(test, loom)))]
         pub fn send_ref_timeout(&self, timeout: Duration) -> Result<SendRef<'_, T>, SendTimeoutError> {
             send_ref_timeout(self.core, self.slots, self.recycle, timeout)
@@ -413,14 +413,14 @@ feature! {
         ///
         /// This method takes the message by value, and replaces any previous
         /// value in the slot. This means that the channel will *not* function
-        /// as an object pool while sending messages with `send`. This method is
+        /// as an object pool while sending messages with `send_timeout`. This method is
         /// most appropriate when messages don't own reusable heap allocations,
         /// or when the [`StaticReceiver`] end of the channel must receive messages
         /// by moving them out of the channel by value (using the
         /// [`StaticReceiver::recv`] method). When messages in the channel own
         /// reusable heap allocations (such as `String`s or `Vec`s), and the
         /// [`StaticReceiver`] doesn't need to receive them by value, consider using
-        /// [`send_ref`] instead, to enable allocation reuse.
+        /// [`send_ref_timeout`] instead, to enable allocation reuse.
         ///
         /// # Errors
         ///
@@ -457,7 +457,7 @@ feature! {
         /// });
         /// ```
         ///
-        /// [`send_ref`]: Self::send_ref
+        /// [`send_ref_timeout`]: Self::send_ref_timeout
         #[cfg(not(all(test, loom)))]
         pub fn send_timeout(&self, val: T, timeout: Duration) -> Result<(), SendTimeoutError<T>> {
             match self.send_ref_timeout(timeout) {
@@ -1050,7 +1050,7 @@ where
     /// Reserves a slot in the channel to mutate in place, blocking until
     /// there is a free slot to write to, waiting for at most `timeout`.
     ///
-    /// This is similar to the [`send`] method, but, rather than taking a
+    /// This is similar to the [`send_timeout`] method, but, rather than taking a
     /// message by value to write to the channel, this method reserves a
     /// writable slot in the channel, and returns a [`SendRef`] that allows
     /// mutating the slot in place. If the [`Receiver`] end of the channel
@@ -1096,7 +1096,7 @@ where
     /// });
     /// ```
     ///
-    /// [`send`]: Self::send
+    /// [`send_timeout`]: Self::send_timeout
     #[cfg(not(all(test, loom)))]
     pub fn send_ref_timeout(&self, timeout: Duration) -> Result<SendRef<'_, T>, SendTimeoutError> {
         send_ref_timeout(
@@ -1108,23 +1108,24 @@ where
     }
 
     /// Sends a message by value, blocking until there is a free slot to
-    /// write to.
+    /// write to, for at most `timeout`.
     ///
     /// This method takes the message by value, and replaces any previous
     /// value in the slot. This means that the channel will *not* function
-    /// as an object pool while sending messages with `send`. This method is
+    /// as an object pool while sending messages with `send_timeout`. This method is
     /// most appropriate when messages don't own reusable heap allocations,
     /// or when the [`Receiver`] end of the channel must receive messages by
     /// moving them out of the channel by value (using the
     /// [`Receiver::recv`] method). When messages in the channel own
     /// reusable heap allocations (such as `String`s or `Vec`s), and the
     /// [`Receiver`] doesn't need to receive them by value, consider using
-    /// [`send_ref`] instead, to enable allocation reuse.
+    /// [`send_ref_timeout`] instead, to enable allocation reuse.
+    ///
     ///
     /// # Errors
     ///
-    /// If the [`Receiver`] end of the channel has been dropped, this
-    /// returns a [`Closed`] error containing the sent value.
+    /// - [`Err`]`(`[`SendTimeoutError::Timeout`]`)` if the timeout has elapsed.
+    /// - [`Err`]`(`[`SendTimeoutError::Closed`]`)` if the channel has closed.
     ///
     /// # Examples
     ///

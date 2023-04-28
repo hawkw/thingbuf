@@ -1,13 +1,13 @@
 //! Errors returned by channels.
 use core::fmt;
 
-/// Error returned by the [`Sender::try_send`] or [`Sender::try_send_ref`] (and
-/// [`StaticSender::try_send`]/[`StaticSender::try_send_ref`]) methods.
+/// Error returned by the [`Sender::send_timeout`] or [`Sender::send_ref_timeout`] 
+/// (and [`StaticSender::send_timeout`]/[`StaticSender::send_ref_timeout`]) methods.
 ///
-/// [`Sender::try_send`]: super::Sender::try_send
-/// [`Sender::try_send_ref`]: super::Sender::try_send_ref
-/// [`StaticSender::try_send`]: super::StaticSender::try_send
-/// [`StaticSender::try_send_ref`]: super::StaticSender::try_send_ref
+/// [`Sender::send_timeout`]: super::Sender::send_timeout
+/// [`Sender::send_ref_timeout`]: super::Sender::send_ref_timeout
+/// [`StaticSender::send_timeout`]: super::StaticSender::send_timeout
+/// [`StaticSender::send_ref_timeout`]: super::StaticSender::send_ref_timeout
 #[non_exhaustive]
 #[derive(PartialEq, Eq)]
 pub enum SendTimeoutError<T = ()> {
@@ -156,8 +156,8 @@ impl<T> SendTimeoutError<T> {
 impl<T> fmt::Debug for SendTimeoutError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Timeout(_) => "SendTimeoutError ::Timeout(..)",
-            Self::Closed(_) => "SendTimeoutError ::Closed(..)",
+            Self::Timeout(_) => "SendTimeoutError::Timeout(..)",
+            Self::Closed(_) => "SendTimeoutError::Closed(..)",
         })
     }
 }
