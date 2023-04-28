@@ -375,7 +375,7 @@ impl Core {
                     continue;
                 }
 
-                // The slot is in invalid state (was skipped). Try to advance the head index.
+                // The slot is in an invalid state (was skipped). Try to advance the head index.
                 match test_dbg!(self
                     .head
                     .compare_exchange_weak(head, next_head, SeqCst, Acquire))
