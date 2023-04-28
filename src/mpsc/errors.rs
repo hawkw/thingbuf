@@ -1,7 +1,7 @@
 //! Errors returned by channels.
 use core::fmt;
 
-/// Error returned by the [`Sender::send_timeout`] or [`Sender::send_ref_timeout`] 
+/// Error returned by the [`Sender::send_timeout`] or [`Sender::send_ref_timeout`]
 /// (and [`StaticSender::send_timeout`]/[`StaticSender::send_ref_timeout`]) methods
 /// (blocking only).
 ///
@@ -9,6 +9,7 @@ use core::fmt;
 /// [`Sender::send_ref_timeout`]: super::blocking::Sender::send_ref_timeout
 /// [`StaticSender::send_timeout`]: super::blocking::StaticSender::send_timeout
 /// [`StaticSender::send_ref_timeout`]: super::blocking::StaticSender::send_ref_timeout
+#[cfg(feature = "std")]
 #[non_exhaustive]
 #[derive(PartialEq, Eq)]
 pub enum SendTimeoutError<T = ()> {
@@ -111,17 +112,15 @@ impl<T> std::error::Error for Closed<T> {}
 
 // === impl SendTimeoutError ===
 
+#[cfg(feature = "std")]
 impl SendTimeoutError {
-    #[cfg(feature = "std")]
     pub(crate) fn with_value<T>(self, value: T) -> SendTimeoutError<T> {
         match self {
             Self::Timeout(()) => SendTimeoutError::Timeout(value),
             Self::Closed(()) => SendTimeoutError::Closed(value),
         }
     }
-}
 
-impl<T> SendTimeoutError<T> {
     /// Returns `true` if this error was returned because the channel is still
     /// full after the timeout has elapsed.
     pub fn is_timeout(&self) -> bool {
@@ -154,6 +153,7 @@ impl<T> SendTimeoutError<T> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<T> fmt::Debug for SendTimeoutError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -163,6 +163,7 @@ impl<T> fmt::Debug for SendTimeoutError<T> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<T> fmt::Display for SendTimeoutError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
