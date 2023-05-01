@@ -76,6 +76,62 @@ fn mpsc_try_recv_ref() {
 }
 
 #[test]
+#[cfg_attr(ci_skip_slow_models, ignore)]
+fn mpsc_test_skip_slot() {
+    loom::model(|| {
+        let (tx, rx) = channel(2);
+
+        let p1 = {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                future::block_on(async move {
+                    tx.send(1).await.unwrap();
+                    tx.send(2).await.unwrap();
+                })
+            })
+        };
+
+        let p2 = {
+            thread::spawn(move || {
+                future::block_on(async move {
+                    tx.send(3).await.unwrap();
+                    tx.send(4).await.unwrap();
+                })
+            })
+        };
+
+        let mut vals = Vec::new();
+        let mut hold: Vec<RecvRef<usize>> = Vec::new();
+
+        while vals.len() < 4 {
+            match rx.try_recv_ref() {
+                Ok(val) => {
+                    if vals.len() == 2 && !hold.is_empty() {
+                        vals.push(*hold.pop().unwrap());
+                        vals.push(*val);
+                    } else if vals.len() == 1 && hold.is_empty() {
+                        hold.push(val);
+                    } else {
+                        vals.push(*val);
+                    }
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Closed) => {
+                    panic!("channel closed");
+                },
+            }
+            thread::yield_now();
+        }
+
+        vals.sort_unstable();
+        assert_eq_dbg!(vals, vec![1, 2, 3, 4]);
+
+        p1.join().unwrap();
+        p2.join().unwrap();
+    })
+}
+
+#[test]
 fn rx_closes() {
     const ITERATIONS: usize = 6;
     loom::model(|| {
@@ -276,6 +332,43 @@ fn spsc_send_recv_in_order_wrap() {
         });
         consumer.join().unwrap();
     })
+}
+
+#[test]
+fn spsc_send_recv_in_order_skip_wrap() {
+    const N_SENDS: usize = 5;
+    loom::model(|| {
+        let (tx, rx) = channel::<usize>((N_SENDS + 1) / 2);
+        let consumer = thread::spawn(move || {
+            future::block_on(async move {
+                let mut hold = Vec::new();
+                assert_eq_dbg!(rx.recv().await, Some(1));
+                loop {
+                    match rx.try_recv_ref() {
+                        Ok(val) => {
+                            assert_eq_dbg!(*val, 2);
+                            hold.push(val);
+                            break;
+                        },
+                        Err(TryRecvError::Empty) => {
+                            loom::thread::yield_now();
+                        },
+                        Err(TryRecvError::Closed) => panic!("channel closed"),
+                    }
+                }
+                for i in 3..=N_SENDS {
+                    assert_eq_dbg!(rx.recv().await, Some(i));
+                }
+                assert_eq_dbg!(rx.recv().await, None);
+            });
+        });
+        future::block_on(async move {
+            for i in 1..=N_SENDS {
+                tx.send(i).await.unwrap();
+            }
+        });
+        consumer.join().unwrap();
+    });
 }
 
 #[test]
