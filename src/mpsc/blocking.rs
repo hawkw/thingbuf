@@ -4,16 +4,11 @@
 //! [`Receiver`] types in this module wait by blocking the current thread,
 //! rather than asynchronously yielding.
 use super::*;
-use crate::{
-    loom::{
-        atomic::{self, Ordering},
-        sync::Arc,
-        thread::{self, Thread},
-    },
-    recycling::{self, Recycle},
-    util::Backoff,
-    wait::queue,
-};
+use crate::{loom::{
+    atomic::{self, Ordering},
+    sync::Arc,
+    thread::{self, Thread},
+}, MAX_CAPACITY, recycling::{self, Recycle}, util::Backoff, wait::queue};
 use core::{fmt, pin::Pin};
 use errors::*;
 use std::time::{Duration, Instant};
@@ -39,6 +34,7 @@ pub fn with_recycle<T, R: Recycle<T>>(
     recycle: R,
 ) -> (Sender<T, R>, Receiver<T, R>) {
     assert!(capacity > 0);
+    assert!(capacity <= MAX_CAPACITY);
     let inner = Arc::new(Inner {
         core: ChannelCore::new(capacity),
         slots: Slot::make_boxed_array(capacity),

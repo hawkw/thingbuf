@@ -114,7 +114,7 @@ fn mpsc_test_skip_slot() {
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Closed) => {
                     panic!("channel closed");
-                },
+                }
             }
             thread::yield_now();
         }
@@ -396,10 +396,10 @@ fn spsc_send_recv_in_order_skip_wrap() {
                         assert_eq_dbg!(*val, 2);
                         hold.push(val);
                         break;
-                    },
+                    }
                     Err(TryRecvError::Empty) => {
                         loom::thread::yield_now();
-                    },
+                    }
                     Err(TryRecvError::Closed) => panic!("channel closed"),
                 }
             }
@@ -407,7 +407,6 @@ fn spsc_send_recv_in_order_skip_wrap() {
                 assert_eq_dbg!(rx.recv(), Some(i));
             }
             assert_eq_dbg!(rx.recv(), None);
-
         });
         for i in 1..=N_SENDS {
             tx.send(i).unwrap();

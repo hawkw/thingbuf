@@ -1,7 +1,4 @@
-use crate::{
-    recycling::{self, Recycle},
-    Core, Full, Ref, Slot,
-};
+use crate::{recycling::{self, Recycle}, Core, Full, Ref, Slot, MAX_CAPACITY};
 use alloc::boxed::Box;
 use core::fmt;
 
@@ -304,6 +301,7 @@ where
     #[must_use]
     pub fn with_recycle(capacity: usize, recycle: R) -> Self {
         assert!(capacity > 0);
+        assert!(capacity <= MAX_CAPACITY);
         Self {
             core: Core::new(capacity),
             slots: Slot::make_boxed_array(capacity),

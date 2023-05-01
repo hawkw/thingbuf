@@ -37,12 +37,17 @@ feature! {
 
 use crate::{
     loom::{
-        atomic::{AtomicBool, AtomicUsize, Ordering::*},
+        atomic::{AtomicUsize, Ordering::*},
         cell::{MutPtr, UnsafeCell},
     },
     mpsc::errors::{TryRecvError, TrySendError},
     util::{Backoff, CachePadded},
 };
+
+/// Maximum capacity of a `ThingBuf`. This is the largest number of elements that
+/// can be stored in a `ThingBuf`. This is the largest power of two that can be
+/// represented by a `usize`, minus one bit for the "has reader" flag.
+pub const MAX_CAPACITY: usize = usize::MAX & !(1 << (usize::BITS - 1));
 
 /// A reference to an entry in a [`ThingBuf`].
 ///
@@ -102,13 +107,14 @@ struct Core {
 
 struct Slot<T> {
     value: UnsafeCell<MaybeUninit<T>>,
+    /// n-th bit is set if the n-th slot is being read from.
     state: AtomicUsize,
-    has_reader: AtomicBool,
 }
 
 impl Core {
     #[cfg(not(all(loom, test)))]
     const fn new(capacity: usize) -> Self {
+        assert!(capacity <= MAX_CAPACITY);
         let closed = (capacity + 1).next_power_of_two();
         let idx_mask = closed - 1;
         let gen = closed << 1;
@@ -159,7 +165,7 @@ impl Core {
         } else {
             // We've reached the end of the current lap, wrap the index around
             // to 0.
-            gen.wrapping_add(self.gen)
+            wrapping_add(gen, self.gen)
         }
     }
 
@@ -212,7 +218,8 @@ impl Core {
                 );
                 slots.get_unchecked(idx)
             };
-            let state = test_dbg!(slot.state.load(SeqCst));
+            let raw_state = test_dbg!(slot.state.load(SeqCst));
+            let state = test_dbg!(clear_has_reader(raw_state));
             // slot is writable
             if test_dbg!(state == tail) {
                 let next_tail = self.next(idx, gen);
@@ -224,7 +231,8 @@ impl Core {
                     Ok(_) => {
                         test_println!("advanced tail {} to {}", tail, next_tail);
                         test_println!("claimed slot [{}]", idx);
-                        let has_reader = test_dbg!(slot.has_reader.load(SeqCst));
+                        // let has_reader = test_dbg!(slot.has_reader.load(SeqCst));
+                        let has_reader = test_dbg!(check_has_reader(raw_state));
                         if test_dbg!(!has_reader) {
                             // We got the slot! It's now okay to write to it
                             // Claim exclusive ownership over the slot
@@ -252,8 +260,16 @@ impl Core {
                             });
                         } else {
                             test_println!("has an active reader, skipping slot [{}]", idx);
-                            let next_state = tail.wrapping_add(self.gen);
-                            test_dbg!(slot.state.store(test_dbg!(next_state), Release));
+                            let mut next_state = wrapping_add(tail, self.gen);
+                            test_dbg!(slot
+                                .state
+                                .fetch_update(SeqCst, SeqCst, |state| {
+                                    if check_has_reader(state) {
+                                        next_state = set_has_reader(next_state);
+                                    }
+                                    Some(next_state)
+                                })
+                                .unwrap_or_else(|_| unreachable!()));
                             backoff.spin();
                             continue;
                         }
@@ -277,7 +293,7 @@ impl Core {
                 // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
                 // load it gets reordered differently in the model checker lmao...
                 let head = test_dbg!(self.head.fetch_or(0, SeqCst));
-                if test_dbg!(head.wrapping_add(self.gen) == tail) {
+                if test_dbg!(wrapping_add(head, self.gen) == tail) {
                     test_println!("channel full");
                     return Err(TrySendError::Full(()));
                 }
@@ -317,11 +333,11 @@ impl Core {
                 slots.get_unchecked(idx)
             };
 
-            let state = test_dbg!(slot.state.load(Acquire));
+            let raw_state = test_dbg!(slot.state.load(Acquire));
             let next_head = self.next(idx, gen);
 
             // If the slot's state is ahead of the head index by one, we can pop it.
-            if test_dbg!(state == head + 1) {
+            if test_dbg!(raw_state == head + 1) {
                 // try to advance the head index
                 match test_dbg!(self
                     .head
@@ -330,8 +346,8 @@ impl Core {
                     Ok(_) => {
                         test_println!("advanced head {} to {}", head, next_head);
                         test_println!("claimed slot [{}]", idx);
-                        let new_state = head.wrapping_add(self.gen);
-                        test_dbg!(slot.has_reader.store(true, SeqCst));
+                        let mut new_state = wrapping_add(head, self.gen);
+                        new_state = set_has_reader(new_state);
                         test_dbg!(slot.state.store(test_dbg!(new_state), SeqCst));
                         return Ok(Ref {
                             new_state,
@@ -367,7 +383,7 @@ impl Core {
                 }
 
                 // Is anyone writing to the slot from this generation?
-                if test_dbg!(state == head) {
+                if test_dbg!(raw_state == head) {
                     if test_dbg!(backoff.done_spinning()) {
                         return Err(TryRecvError::Empty);
                     }
@@ -443,6 +459,26 @@ impl Core {
     }
 }
 
+#[inline]
+fn check_has_reader(state: usize) -> bool {
+    ((state >> (usize::BITS - 1)) & 1) == 1
+}
+
+#[inline]
+fn set_has_reader(state: usize) -> usize {
+    state | (1 << (usize::BITS - 1))
+}
+
+#[inline]
+fn clear_has_reader(state: usize) -> usize {
+    state & !(1 << (usize::BITS - 1))
+}
+
+#[inline]
+fn wrapping_add(a: usize, b: usize) -> usize {
+    (a + b) & MAX_CAPACITY
+}
+
 impl Drop for Core {
     fn drop(&mut self) {
         debug_assert!(
@@ -511,7 +547,13 @@ impl<T> Drop for Ref<'_, T> {
     fn drop(&mut self) {
         if self.is_pop {
             test_println!("drop Ref<{}> (pop)", core::any::type_name::<T>());
-            test_dbg!(self.slot.has_reader.store(test_dbg!(false), SeqCst));
+            test_dbg!(self
+                .slot
+                .state
+                .fetch_update(SeqCst, SeqCst, |state| {
+                    Some(test_dbg!(clear_has_reader(state)))
+                })
+                .unwrap_or_else(|_| unreachable!()));
         } else {
             test_println!(
                 "drop Ref<{}> (push), new_state = {}",
@@ -585,7 +627,6 @@ impl<T> Slot<T> {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
             state: AtomicUsize::new(idx),
-            has_reader: AtomicBool::new(false),
         }
     }
 
@@ -594,7 +635,6 @@ impl<T> Slot<T> {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
             state: AtomicUsize::new(idx),
-            has_reader: AtomicBool::new(false),
         }
     }
 }

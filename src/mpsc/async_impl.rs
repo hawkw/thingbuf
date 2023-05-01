@@ -15,7 +15,7 @@ use errors::*;
 feature! {
     #![feature = "alloc"]
 
-    use crate::loom::sync::Arc;
+    use crate::{MAX_CAPACITY, loom::sync::Arc};
     use alloc::boxed::Box;
 
     /// Returns a new asynchronous multi-producer, single consumer (MPSC)
@@ -36,6 +36,7 @@ feature! {
     #[must_use]
     pub fn with_recycle<T, R: Recycle<T>>(capacity: usize, recycle: R) -> (Sender<T, R>, Receiver<T, R>) {
         assert!(capacity > 0);
+        assert!(capacity <= MAX_CAPACITY);
         let inner = Arc::new(Inner {
             core: ChannelCore::new(capacity),
             slots: Slot::make_boxed_array(capacity),
