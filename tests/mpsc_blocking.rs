@@ -122,4 +122,3 @@ fn spsc_empty_after_skipped() {
     assert_eq!(rx.recv(), Some(1));
     assert!(matches!(rx.try_recv_ref(), Err(TryRecvError::Empty)));
 }
-

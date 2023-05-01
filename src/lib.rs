@@ -182,8 +182,8 @@ impl Core {
         slots: &'slots [Slot<T>],
         recycle: &R,
     ) -> Result<Ref<'slots, T>, TrySendError<()>>
-        where
-            R: Recycle<T>,
+    where
+        R: Recycle<T>,
     {
         test_println!("push_ref");
         let mut backoff = Backoff::new();
