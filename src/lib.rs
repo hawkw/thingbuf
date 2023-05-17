@@ -228,50 +228,47 @@ impl Core {
                     .tail
                     .compare_exchange_weak(tail, next_tail, SeqCst, Acquire))
                 {
-                    Ok(_) => {
-                        test_println!("advanced tail {} to {}", tail, next_tail);
-                        test_println!("claimed slot [{}]", idx);
-                        let has_reader = test_dbg!(check_has_reader(raw_state));
-                        if test_dbg!(!has_reader) {
-                            // We got the slot! It's now okay to write to it
-                            // Claim exclusive ownership over the slot
-                            let ptr = slot.value.get_mut();
-                            // Initialize or recycle the element.
-                            unsafe {
-                                // Safety: we have just claimed exclusive ownership over
-                                // this slot.
-                                let ptr = ptr.deref();
-                                if gen == 0 {
-                                    ptr.write(recycle.new_element());
-                                    test_println!("-> initialized");
-                                } else {
-                                    // Safety: if the generation is > 0, then the
-                                    // slot has already been initialized.
-                                    recycle.recycle(ptr.assume_init_mut());
-                                    test_println!("-> recycled");
+                    Ok(_) if test_dbg!(check_has_reader(raw_state)) => {
+                        test_println!("advanced tail {tail} to {next_tail}; has an active reader, skipping slot [{idx}]");
+                        let mut next_state = wrapping_add(tail, self.gen);
+                        test_dbg!(slot
+                            .state
+                            .fetch_update(SeqCst, SeqCst, |state| {
+                                if check_has_reader(state) {
+                                    next_state = set_has_reader(next_state);
                                 }
+                                Some(next_state)
+                            })
+                            .unwrap_or_else(|_| unreachable!()));
+                        backoff.spin();
+                        continue;
+                    }
+                    Ok(_) => {
+                        // We got the slot! It's now okay to write to it
+                        test_println!("advanced tail {tail} to {next_tail}; claimed slot [{idx}]");
+                        // Claim exclusive ownership over the slot
+                        let ptr = slot.value.get_mut();
+                        // Initialize or recycle the element.
+                        unsafe {
+                            // Safety: we have just claimed exclusive ownership over
+                            // this slot.
+                            let ptr = ptr.deref();
+                            if gen == 0 {
+                                ptr.write(recycle.new_element());
+                                test_println!("-> initialized");
+                            } else {
+                                // Safety: if the generation is > 0, then the
+                                // slot has already been initialized.
+                                recycle.recycle(ptr.assume_init_mut());
+                                test_println!("-> recycled");
                             }
-                            return Ok(Ref {
-                                ptr,
-                                new_state: tail + 1,
-                                slot,
-                                is_pop: false,
-                            });
-                        } else {
-                            test_println!("has an active reader, skipping slot [{}]", idx);
-                            let mut next_state = wrapping_add(tail, self.gen);
-                            test_dbg!(slot
-                                .state
-                                .fetch_update(SeqCst, SeqCst, |state| {
-                                    if check_has_reader(state) {
-                                        next_state = set_has_reader(next_state);
-                                    }
-                                    Some(next_state)
-                                })
-                                .unwrap_or_else(|_| unreachable!()));
-                            backoff.spin();
-                            continue;
                         }
+                        return Ok(Ref {
+                            ptr,
+                            new_state: tail + 1,
+                            slot,
+                            is_pop: false,
+                        });
                     }
                     Err(actual) => {
                         // Someone else took this slot and advanced the tail
@@ -390,14 +387,10 @@ impl Core {
                 }
 
                 // The slot is in an invalid state (was skipped). Try to advance the head index.
-                match test_dbg!(self
-                    .head
-                    .compare_exchange(head, next_head, SeqCst, Acquire))
-                {
+                match test_dbg!(self.head.compare_exchange(head, next_head, SeqCst, Acquire)) {
                     Ok(_) => {
                         test_println!("skipped head slot [{}], new head={}", idx, next_head);
                         backoff.spin();
-                        continue;
                     }
                     Err(actual) => {
                         test_println!(
@@ -408,7 +401,6 @@ impl Core {
                         );
                         head = actual;
                         backoff.spin();
-                        continue;
                     }
                 }
             }
@@ -547,10 +539,7 @@ impl<T> Drop for Ref<'_, T> {
     fn drop(&mut self) {
         if self.is_pop {
             test_println!("drop Ref<{}> (pop)", core::any::type_name::<T>());
-            test_dbg!(self
-                .slot
-                .state
-                .fetch_and(!HAS_READER, SeqCst));
+            test_dbg!(self.slot.state.fetch_and(!HAS_READER, SeqCst));
         } else {
             test_println!(
                 "drop Ref<{}> (push), new_state = {}",
