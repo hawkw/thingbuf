@@ -394,7 +394,7 @@ impl Core {
                 // The slot is in an invalid state (was skipped). Try to advance the head index.
                 match test_dbg!(self
                     .head
-                    .compare_exchange_weak(head, next_head, SeqCst, Acquire))
+                    .compare_exchange(head, next_head, SeqCst, Acquire))
                 {
                     Ok(_) => {
                         test_println!("skipped head slot [{}], new head={}", idx, next_head);
