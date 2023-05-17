@@ -229,7 +229,12 @@ impl Core {
                     .compare_exchange_weak(tail, next_tail, SeqCst, Acquire))
                 {
                     Ok(_) if test_dbg!(check_has_reader(raw_state)) => {
-                        test_println!("advanced tail {tail} to {next_tail}; has an active reader, skipping slot [{idx}]");
+                        test_println!(
+                            "advanced tail {} to {}; has an active reader, skipping slot [{}]",
+                            tail,
+                            next_tail,
+                            idx
+                        );
                         let mut next_state = wrapping_add(tail, self.gen);
                         test_dbg!(slot
                             .state
@@ -245,7 +250,12 @@ impl Core {
                     }
                     Ok(_) => {
                         // We got the slot! It's now okay to write to it
-                        test_println!("advanced tail {tail} to {next_tail}; claimed slot [{idx}]");
+                        test_println!(
+                            "advanced tail {} to {}; claimed slot [{}]",
+                            tail,
+                            next_tail,
+                            idx
+                        );
                         // Claim exclusive ownership over the slot
                         let ptr = slot.value.get_mut();
                         // Initialize or recycle the element.
