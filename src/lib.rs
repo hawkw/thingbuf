@@ -231,7 +231,6 @@ impl Core {
                     Ok(_) => {
                         test_println!("advanced tail {} to {}", tail, next_tail);
                         test_println!("claimed slot [{}]", idx);
-                        // let has_reader = test_dbg!(slot.has_reader.load(SeqCst));
                         let has_reader = test_dbg!(check_has_reader(raw_state));
                         if test_dbg!(!has_reader) {
                             // We got the slot! It's now okay to write to it
@@ -359,7 +358,6 @@ impl Core {
                     Err(actual) => {
                         test_println!("failed to advance head, head={}, actual={}", head, actual);
                         head = actual;
-                        backoff.spin();
                         continue;
                     }
                 }
