@@ -550,10 +550,7 @@ impl<T> Drop for Ref<'_, T> {
             test_dbg!(self
                 .slot
                 .state
-                .fetch_update(SeqCst, SeqCst, |state| {
-                    Some(test_dbg!(clear_has_reader(state)))
-                })
-                .unwrap_or_else(|_| unreachable!()));
+                .fetch_and(!HAS_READER, SeqCst));
         } else {
             test_println!(
                 "drop Ref<{}> (push), new_state = {}",
