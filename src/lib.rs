@@ -459,19 +459,21 @@ impl Core {
     }
 }
 
+const HAS_READER: usize = 1 << (usize::BITS - 1);
+
 #[inline]
 fn check_has_reader(state: usize) -> bool {
-    ((state >> (usize::BITS - 1)) & 1) == 1
+    state & HAS_READER == HAS_READER
 }
 
 #[inline]
 fn set_has_reader(state: usize) -> usize {
-    state | (1 << (usize::BITS - 1))
+    state | HAS_READER
 }
 
 #[inline]
 fn clear_has_reader(state: usize) -> usize {
-    state & !(1 << (usize::BITS - 1))
+    state & !HAS_READER
 }
 
 #[inline]
