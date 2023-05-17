@@ -1,14 +1,16 @@
 <a name="v0.1.4"></a>
-## v0.1.4 (2023-04-26)
+## v0.1.4 (2023-05-01)
 
-#### Features
-
-* **blocking::mpsc:**  add `Receiver::recv(_ref)_timeout` methods (#75) ([b57ce88a](https://github.com/hawkw/thingbuf/commit/b57ce88ac85cf71b363035249e27f1c91e65f372))
 
 #### Bug Fixes
 
 * **blocking::mpsc:**  increase durations in doctests (#78) ([465fd3cb](https://github.com/hawkw/thingbuf/commit/465fd3cbcb411a4413f382afcdfab1e5d68f3a4a))
 
+#### Features
+
+* **blocking::mpsc:**
+  *  add `Sender::send(_ref)_timeout` methods (#79) ([979ed6e8](https://github.com/hawkw/thingbuf/commit/979ed6e8d5ddc11e3d378e0a2829272d1c329624))
+  *  add `Receiver::recv(_ref)_timeout` methods (#75) ([b57ce88a](https://github.com/hawkw/thingbuf/commit/b57ce88ac85cf71b363035249e27f1c91e65f372))
 
 
 <a name="v0.1.3"></a>
