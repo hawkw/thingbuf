@@ -107,7 +107,7 @@ struct Core {
 
 struct Slot<T> {
     value: UnsafeCell<MaybeUninit<T>>,
-    /// n-th bit is set if the n-th slot is being read from.
+    /// The most significant bit of the slot's state is set if this slot is being read from.
     state: AtomicUsize,
 }
 
@@ -279,20 +279,20 @@ impl Core {
                         continue;
                     }
                 }
-            } else {
-                // check if we have any available slots
-                // fake RMW op to placate loom. this should be equivalent to
-                // doing a relaxed load after a SeqCst fence (per Godbolt
-                // https://godbolt.org/z/zb15qfEa9), however, loom understands
-                // this correctly, while it does not understand an explicit
-                // SeqCst fence and a load.
-                // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
-                // load it gets reordered differently in the model checker lmao...
-                let head = test_dbg!(self.head.fetch_or(0, SeqCst));
-                if test_dbg!(wrapping_add(head, self.gen) == tail) {
-                    test_println!("channel full");
-                    return Err(TrySendError::Full(()));
-                }
+            }
+
+            // check if we have any available slots
+            // fake RMW op to placate loom. this should be equivalent to
+            // doing a relaxed load after a SeqCst fence (per Godbolt
+            // https://godbolt.org/z/zb15qfEa9), however, loom understands
+            // this correctly, while it does not understand an explicit
+            // SeqCst fence and a load.
+            // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
+            // load it gets reordered differently in the model checker lmao...
+            let head = test_dbg!(self.head.fetch_or(0, SeqCst));
+            if test_dbg!(wrapping_add(head, self.gen) == tail) {
+                test_println!("channel full");
+                return Err(TrySendError::Full(()));
             }
 
             backoff.spin_yield();
