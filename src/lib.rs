@@ -372,6 +372,7 @@ impl Core {
                     Err(actual) => {
                         test_println!("failed to advance head, head={}, actual={}", head, actual);
                         head = actual;
+                        backoff.spin();
                         continue;
                     }
                 }
@@ -407,7 +408,6 @@ impl Core {
                 match test_dbg!(self.head.compare_exchange(head, next_head, SeqCst, Acquire)) {
                     Ok(_) => {
                         test_println!("skipped head slot [{}], new head={}", idx, next_head);
-                        backoff.spin();
                     }
                     Err(actual) => {
                         test_println!(
