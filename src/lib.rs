@@ -44,10 +44,12 @@ use crate::{
     util::{Backoff, CachePadded},
 };
 
+const HAS_READER: usize = 1 << (usize::BITS - 1);
+
 /// Maximum capacity of a `ThingBuf`. This is the largest number of elements that
-/// can be stored in a `ThingBuf`. This is the largest power of two that can be
-/// represented by a `usize`, minus one bit for the "has reader" flag.
-pub const MAX_CAPACITY: usize = usize::MAX & !(1 << (usize::BITS - 1));
+/// can be stored in a `ThingBuf`. This is the highest power of two that can be expressed by a
+/// `usize`, excluding the most significant bit reserved for the "has reader" flag.
+pub const MAX_CAPACITY: usize = usize::MAX & !HAS_READER;
 
 /// A reference to an entry in a [`ThingBuf`].
 ///
@@ -463,8 +465,6 @@ impl Core {
         self.has_dropped_slots = true;
     }
 }
-
-const HAS_READER: usize = 1 << (usize::BITS - 1);
 
 #[inline]
 fn check_has_reader(state: usize) -> bool {

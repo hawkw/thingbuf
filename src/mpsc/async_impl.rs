@@ -32,6 +32,12 @@ feature! {
     /// Returns a new asynchronous multi-producer, single consumer (MPSC)
     /// channel with the provided capacity and [recycling policy].
     ///
+    /// # Panics
+    ///
+    /// Panics if the capacity exceeds `usize::MAX & !(1 << (usize::BITS - 1))`. This value
+    /// represents the highest power of two that can be expressed by a `usize`, excluding the most
+    /// significant bit.
+    ///
     /// [recycling policy]: crate::recycling::Recycle
     #[must_use]
     pub fn with_recycle<T, R: Recycle<T>>(capacity: usize, recycle: R) -> (Sender<T, R>, Receiver<T, R>) {
