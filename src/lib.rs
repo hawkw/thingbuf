@@ -242,14 +242,11 @@ impl Core {
                             next_tail,
                             idx
                         );
-                        let mut next_state = wrapping_add(tail, self.gen);
+                        let next_state = wrapping_add(tail, self.gen);
                         test_dbg!(slot
                             .state
                             .fetch_update(SeqCst, SeqCst, |state| {
-                                if check_has_reader(state) {
-                                    next_state = set_has_reader(next_state);
-                                }
-                                Some(next_state)
+                                Some(state & HAS_READER | next_state)
                             })
                             .unwrap_or_else(|_| unreachable!()));
                         backoff.spin();
