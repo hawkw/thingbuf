@@ -1,5 +1,7 @@
 use super::*;
 use crate::loom::{self, alloc::Track, thread};
+use crate::mpsc::blocking;
+use crate::mpsc::blocking::RecvRef;
 
 #[test]
 #[cfg_attr(ci_skip_slow_models, ignore)]
@@ -59,6 +61,68 @@ fn mpsc_try_recv_ref() {
                 Ok(val) => vals.push(*val),
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Closed) => panic!("channel closed"),
+            }
+            thread::yield_now();
+        }
+
+        vals.sort_unstable();
+        assert_eq_dbg!(vals, vec![1, 2, 3, 4]);
+
+        p1.join().unwrap();
+        p2.join().unwrap();
+    })
+}
+
+#[test]
+#[cfg_attr(ci_skip_slow_models, ignore)]
+fn mpsc_test_skip_slot() {
+    // This test emulates a situation where we might need to skip a slot. The setup includes two writing
+    // threads that write elements to the channel and one reading thread that maintains a RecvRef to the
+    // third element until the end of the test, necessitating the skip:
+    // Given that the channel capacity is 2, here's the sequence of operations:
+    //   Thread 1 writes: 1, 2
+    //   Thread 2 writes: 3, 4
+    // The main thread reads from slots in this order: 0, 1, 0 (holds ref), 1, 1.
+    // As a result, the third slot is skipped during this process.
+    loom::model(|| {
+        let (tx, rx) = blocking::channel(2);
+
+        let p1 = {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                *tx.send_ref().unwrap() = 1;
+                thread::yield_now();
+                *tx.send_ref().unwrap() = 2;
+            })
+        };
+
+        let p2 = {
+            thread::spawn(move || {
+                *tx.send_ref().unwrap() = 3;
+                thread::yield_now();
+                *tx.send_ref().unwrap() = 4;
+            })
+        };
+
+        let mut vals = Vec::new();
+        let mut hold: Vec<RecvRef<usize>> = Vec::new();
+
+        while vals.len() < 4 {
+            match rx.try_recv_ref() {
+                Ok(val) => {
+                    if vals.len() == 2 && !hold.is_empty() {
+                        vals.push(*hold.pop().unwrap());
+                        vals.push(*val);
+                    } else if vals.len() == 1 && hold.is_empty() {
+                        hold.push(val);
+                    } else {
+                        vals.push(*val);
+                    }
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Closed) => {
+                    panic!("channel closed");
+                }
             }
             thread::yield_now();
         }
@@ -324,6 +388,40 @@ fn spsc_send_recv_in_order_wrap() {
         drop(tx);
         consumer.join().unwrap();
     })
+}
+
+#[test]
+fn spsc_send_recv_in_order_skip_wrap() {
+    const N_SENDS: usize = 5;
+    loom::model(|| {
+        let (tx, rx) = blocking::channel::<usize>((N_SENDS + 1) / 2);
+        let consumer = thread::spawn(move || {
+            let mut hold = Vec::new();
+            assert_eq_dbg!(rx.recv(), Some(1));
+            loop {
+                match rx.try_recv_ref() {
+                    Ok(val) => {
+                        assert_eq_dbg!(*val, 2);
+                        hold.push(val);
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => {
+                        loom::thread::yield_now();
+                    }
+                    Err(TryRecvError::Closed) => panic!("channel closed"),
+                }
+            }
+            for i in 3..=N_SENDS {
+                assert_eq_dbg!(rx.recv(), Some(i));
+            }
+            assert_eq_dbg!(rx.recv(), None);
+        });
+        for i in 1..=N_SENDS {
+            tx.send(i).unwrap();
+        }
+        drop(tx);
+        consumer.join().unwrap();
+    });
 }
 
 #[test]

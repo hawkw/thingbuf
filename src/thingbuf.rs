@@ -1,7 +1,4 @@
-use crate::{
-    recycling::{self, Recycle},
-    Core, Full, Ref, Slot,
-};
+use crate::{recycling::{self, Recycle}, Core, Full, Ref, Slot, MAX_CAPACITY};
 use alloc::boxed::Box;
 use core::fmt;
 
@@ -300,10 +297,17 @@ where
     /// Returns a new `ThingBuf` with space for `capacity` elements and
     /// the provided [recycling policy].
     ///
+    /// # Panics
+    ///
+    /// Panics if the capacity exceeds `usize::MAX & !(1 << (usize::BITS - 1))`. This value
+    /// represents the highest power of two that can be expressed by a `usize`, excluding the most
+    /// significant bit.
+    ///
     /// [recycling policy]: crate::recycling::Recycle
     #[must_use]
     pub fn with_recycle(capacity: usize, recycle: R) -> Self {
         assert!(capacity > 0);
+        assert!(capacity <= MAX_CAPACITY);
         Self {
             core: Core::new(capacity),
             slots: Slot::make_boxed_array(capacity),

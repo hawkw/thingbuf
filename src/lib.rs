@@ -3,6 +3,7 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
 use core::{cmp, fmt, mem::MaybeUninit, ops, ptr};
+
 #[macro_use]
 mod macros;
 
@@ -43,6 +44,13 @@ use crate::{
     util::{Backoff, CachePadded},
 };
 
+const HAS_READER: usize = 1 << (usize::BITS - 1);
+
+/// Maximum capacity of a `ThingBuf`. This is the largest number of elements that
+/// can be stored in a `ThingBuf`. This is the highest power of two that can be expressed by a
+/// `usize`, excluding the most significant bit reserved for the "has reader" flag.
+pub const MAX_CAPACITY: usize = usize::MAX & !HAS_READER;
+
 /// A reference to an entry in a [`ThingBuf`].
 ///
 /// A `Ref` represents the exclusive permission to mutate a given element in a
@@ -62,6 +70,7 @@ pub struct Ref<'slot, T> {
     ptr: MutPtr<MaybeUninit<T>>,
     slot: &'slot Slot<T>,
     new_state: usize,
+    is_pop: bool,
 }
 
 /// Error indicating that a `push` operation failed because a queue was at
@@ -100,12 +109,19 @@ struct Core {
 
 struct Slot<T> {
     value: UnsafeCell<MaybeUninit<T>>,
+    /// Each slot's state has two components: a flag indicated by the most significant bit (MSB), and the rest of the state.
+    /// The MSB is set when a reader is reading from this slot.
+    /// The rest of the state helps determine the availability of the slot for reading or writing:
+    /// - A slot is available for reading when the state (excluding the MSB) equals head + 1.
+    /// - A slot is available for writing when the state (excluding the MSB) equals tail.
+    /// At initialization, each slot's state is set to its ordinal index.
     state: AtomicUsize,
 }
 
 impl Core {
     #[cfg(not(all(loom, test)))]
     const fn new(capacity: usize) -> Self {
+        assert!(capacity <= MAX_CAPACITY);
         let closed = (capacity + 1).next_power_of_two();
         let idx_mask = closed - 1;
         let gen = closed << 1;
@@ -156,7 +172,7 @@ impl Core {
         } else {
             // We've reached the end of the current lap, wrap the index around
             // to 0.
-            gen.wrapping_add(self.gen)
+            wrapping_add(gen, self.gen)
         }
     }
 
@@ -184,8 +200,7 @@ impl Core {
     {
         test_println!("push_ref");
         let mut backoff = Backoff::new();
-        let mut tail = self.tail.load(Relaxed);
-
+        let mut tail = test_dbg!(self.tail.load(Relaxed));
         loop {
             if test_dbg!(tail & self.closed != 0) {
                 return Err(TrySendError::Closed(()));
@@ -210,21 +225,43 @@ impl Core {
                 );
                 slots.get_unchecked(idx)
             };
-            let state = test_dbg!(slot.state.load(Acquire));
-
+            let raw_state = test_dbg!(slot.state.load(SeqCst));
+            let state = test_dbg!(clear_has_reader(raw_state));
+            // slot is writable
             if test_dbg!(state == tail) {
-                // Move the tail index forward by 1.
                 let next_tail = self.next(idx, gen);
+                // try to advance the tail
                 match test_dbg!(self
                     .tail
                     .compare_exchange_weak(tail, next_tail, SeqCst, Acquire))
                 {
+                    Ok(_) if test_dbg!(check_has_reader(raw_state)) => {
+                        test_println!(
+                            "advanced tail {} to {}; has an active reader, skipping slot [{}]",
+                            tail,
+                            next_tail,
+                            idx
+                        );
+                        let next_state = wrapping_add(tail, self.gen);
+                        test_dbg!(slot
+                            .state
+                            .fetch_update(SeqCst, SeqCst, |state| {
+                                Some(state & HAS_READER | next_state)
+                            })
+                            .unwrap_or_else(|_| unreachable!()));
+                        backoff.spin();
+                        continue;
+                    }
                     Ok(_) => {
                         // We got the slot! It's now okay to write to it
-                        test_println!("claimed tail slot [{}]", idx);
+                        test_println!(
+                            "advanced tail {} to {}; claimed slot [{}]",
+                            tail,
+                            next_tail,
+                            idx
+                        );
                         // Claim exclusive ownership over the slot
                         let ptr = slot.value.get_mut();
-
                         // Initialize or recycle the element.
                         unsafe {
                             // Safety: we have just claimed exclusive ownership over
@@ -240,16 +277,17 @@ impl Core {
                                 test_println!("-> recycled");
                             }
                         }
-
                         return Ok(Ref {
                             ptr,
                             new_state: tail + 1,
                             slot,
+                            is_pop: false,
                         });
                     }
                     Err(actual) => {
                         // Someone else took this slot and advanced the tail
                         // index. Try to claim the new tail.
+                        test_println!("failed to advance tail {} to {}", tail, next_tail);
                         tail = actual;
                         backoff.spin();
                         continue;
@@ -257,25 +295,21 @@ impl Core {
                 }
             }
 
-            if test_dbg!(state.wrapping_add(self.gen) == tail + 1) {
-                // fake RMW op to placate loom. this should be equivalent to
-                // doing a relaxed load after a SeqCst fence (per Godbolt
-                // https://godbolt.org/z/zb15qfEa9), however, loom understands
-                // this correctly, while it does not understand an explicit
-                // SeqCst fence and a load.
-                // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
-                // load it gets reordered differently in the model checker lmao...
-                let head = test_dbg!(self.head.fetch_or(0, SeqCst));
-                if test_dbg!(head.wrapping_add(self.gen) == tail) {
-                    test_println!("channel full");
-                    return Err(TrySendError::Full(()));
-                }
-
-                backoff.spin();
-            } else {
-                backoff.spin_yield();
+            // check if we have any available slots
+            // fake RMW op to placate loom. this should be equivalent to
+            // doing a relaxed load after a SeqCst fence (per Godbolt
+            // https://godbolt.org/z/zb15qfEa9), however, loom understands
+            // this correctly, while it does not understand an explicit
+            // SeqCst fence and a load.
+            // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
+            // load it gets reordered differently in the model checker lmao...
+            let head = test_dbg!(self.head.fetch_or(0, SeqCst));
+            if test_dbg!(wrapping_add(head, self.gen) == tail) {
+                test_println!("channel full");
+                return Err(TrySendError::Full(()));
             }
 
+            backoff.spin_yield();
             tail = test_dbg!(self.tail.load(Acquire));
         }
     }
@@ -308,33 +342,39 @@ impl Core {
                 );
                 slots.get_unchecked(idx)
             };
-            let state = test_dbg!(slot.state.load(Acquire));
 
-            // If the slot's state is ahead of the head index by one, we can pop
-            // it.
-            if test_dbg!(state == head + 1) {
-                let next_head = self.next(idx, gen);
+            let raw_state = test_dbg!(slot.state.load(Acquire));
+            let next_head = self.next(idx, gen);
+
+            // If the slot's state is ahead of the head index by one, we can pop it.
+            if test_dbg!(raw_state == head + 1) {
+                // try to advance the head index
                 match test_dbg!(self
                     .head
                     .compare_exchange_weak(head, next_head, SeqCst, Acquire))
                 {
                     Ok(_) => {
-                        test_println!("claimed head slot [{}]", idx);
+                        test_println!("advanced head {} to {}", head, next_head);
+                        test_println!("claimed slot [{}]", idx);
+                        let mut new_state = wrapping_add(head, self.gen);
+                        new_state = set_has_reader(new_state);
+                        test_dbg!(slot.state.store(test_dbg!(new_state), SeqCst));
                         return Ok(Ref {
-                            new_state: head.wrapping_add(self.gen),
+                            new_state,
                             ptr: slot.value.get_mut(),
                             slot,
+                            is_pop: true,
                         });
                     }
                     Err(actual) => {
+                        test_println!("failed to advance head, head={}, actual={}", head, actual);
                         head = actual;
                         backoff.spin();
                         continue;
                     }
                 }
-            }
-
-            if test_dbg!(state == head) {
+            } else {
+                // Maybe we reached the tail index? If so, the buffer is empty.
                 // fake RMW op to placate loom. this should be equivalent to
                 // doing a relaxed load after a SeqCst fence (per Godbolt
                 // https://godbolt.org/z/zb15qfEa9), however, loom understands
@@ -342,9 +382,7 @@ impl Core {
                 // SeqCst fence and a load.
                 // XXX(eliza): this makes me DEEPLY UNCOMFORTABLE but if it's a
                 // load it gets reordered differently in the model checker lmao...
-
                 let tail = test_dbg!(self.tail.fetch_or(0, SeqCst));
-
                 if test_dbg!(tail & !self.closed == head) {
                     return if test_dbg!(tail & self.closed != 0) {
                         Err(TryRecvError::Closed)
@@ -354,16 +392,32 @@ impl Core {
                     };
                 }
 
-                if test_dbg!(backoff.done_spinning()) {
-                    return Err(TryRecvError::Empty);
+                // Is anyone writing to the slot from this generation?
+                if test_dbg!(raw_state == head) {
+                    if test_dbg!(backoff.done_spinning()) {
+                        return Err(TryRecvError::Empty);
+                    }
+                    backoff.spin();
+                    continue;
                 }
 
-                backoff.spin();
-            } else {
-                backoff.spin_yield();
+                // The slot is in an invalid state (was skipped). Try to advance the head index.
+                match test_dbg!(self.head.compare_exchange(head, next_head, SeqCst, Acquire)) {
+                    Ok(_) => {
+                        test_println!("skipped head slot [{}], new head={}", idx, next_head);
+                    }
+                    Err(actual) => {
+                        test_println!(
+                            "failed to skip head slot [{}], head={}, actual={}",
+                            idx,
+                            head,
+                            actual
+                        );
+                        head = actual;
+                        backoff.spin();
+                    }
+                }
             }
-
-            head = test_dbg!(self.head.load(Acquire));
         }
     }
 
@@ -407,6 +461,26 @@ impl Core {
 
         self.has_dropped_slots = true;
     }
+}
+
+#[inline]
+fn check_has_reader(state: usize) -> bool {
+    state & HAS_READER == HAS_READER
+}
+
+#[inline]
+fn set_has_reader(state: usize) -> usize {
+    state | HAS_READER
+}
+
+#[inline]
+fn clear_has_reader(state: usize) -> usize {
+    state & !HAS_READER
+}
+
+#[inline]
+fn wrapping_add(a: usize, b: usize) -> usize {
+    (a + b) & MAX_CAPACITY
 }
 
 impl Drop for Core {
@@ -475,8 +549,17 @@ impl<T> ops::DerefMut for Ref<'_, T> {
 impl<T> Drop for Ref<'_, T> {
     #[inline]
     fn drop(&mut self) {
-        test_println!("drop Ref<{}>", core::any::type_name::<T>());
-        test_dbg!(self.slot.state.store(test_dbg!(self.new_state), Release));
+        if self.is_pop {
+            test_println!("drop Ref<{}> (pop)", core::any::type_name::<T>());
+            test_dbg!(self.slot.state.fetch_and(!HAS_READER, SeqCst));
+        } else {
+            test_println!(
+                "drop Ref<{}> (push), new_state = {}",
+                core::any::type_name::<T>(),
+                self.new_state
+            );
+            test_dbg!(self.slot.state.store(test_dbg!(self.new_state), Release));
+        }
     }
 }
 

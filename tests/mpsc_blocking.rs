@@ -1,5 +1,6 @@
 use std::thread;
 use thingbuf::mpsc::blocking;
+use thingbuf::mpsc::errors::{TryRecvError, TrySendError};
 
 #[test]
 fn basically_works() {
@@ -69,4 +70,55 @@ fn tx_close_drains_queue() {
 
         producer.join().unwrap();
     }
+}
+
+#[test]
+fn spsc_skip_slot() {
+    let (tx, rx) = blocking::channel::<usize>(3);
+    // 0 lap
+    tx.send(0).unwrap();
+    assert_eq!(rx.recv(), Some(0));
+    tx.send(1).unwrap();
+    let msg_ref = rx.try_recv_ref().unwrap();
+    tx.send(2).unwrap();
+    assert_eq!(rx.recv(), Some(2));
+    // 1 lap
+    tx.send(3).unwrap();
+    assert_eq!(rx.recv(), Some(3));
+    tx.send(4).unwrap();
+    assert_eq!(rx.recv(), Some(4));
+    drop(msg_ref);
+    // 2 lap
+    tx.send(5).unwrap();
+    tx.send(6).unwrap();
+    tx.send(7).unwrap();
+    assert!(matches!(tx.try_send_ref(), Err(TrySendError::Full(_))));
+    assert_eq!(rx.recv(), Some(5));
+    assert_eq!(rx.recv(), Some(6));
+    assert_eq!(rx.recv(), Some(7));
+}
+
+#[test]
+fn spsc_full_after_skipped() {
+    let (tx, rx) = blocking::channel::<usize>(3);
+    // 0 lap
+    tx.send(0).unwrap();
+    assert_eq!(rx.recv(), Some(0));
+    tx.send(1).unwrap();
+    let _msg_ref = rx.try_recv_ref().unwrap();
+    tx.send(2).unwrap();
+    // lap 1
+    tx.send(3).unwrap();
+    assert!(matches!(tx.try_send_ref(), Err(TrySendError::Full(_))));
+}
+
+#[test]
+fn spsc_empty_after_skipped() {
+    let (tx, rx) = blocking::channel::<usize>(2);
+    // 0 lap
+    tx.send(0).unwrap();
+    tx.send(1).unwrap();
+    let _msg_ref = rx.try_recv_ref().unwrap();
+    assert_eq!(rx.recv(), Some(1));
+    assert!(matches!(rx.try_recv_ref(), Err(TryRecvError::Empty)));
 }

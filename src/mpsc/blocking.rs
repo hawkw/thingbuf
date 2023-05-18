@@ -4,16 +4,11 @@
 //! [`Receiver`] types in this module wait by blocking the current thread,
 //! rather than asynchronously yielding.
 use super::*;
-use crate::{
-    loom::{
-        atomic::{self, Ordering},
-        sync::Arc,
-        thread::{self, Thread},
-    },
-    recycling::{self, Recycle},
-    util::Backoff,
-    wait::queue,
-};
+use crate::{loom::{
+    atomic::{self, Ordering},
+    sync::Arc,
+    thread::{self, Thread},
+}, MAX_CAPACITY, recycling::{self, Recycle}, util::Backoff, wait::queue};
 use core::{fmt, pin::Pin};
 use errors::*;
 use std::time::{Duration, Instant};
@@ -32,6 +27,11 @@ pub fn channel<T: Default + Clone>(capacity: usize) -> (Sender<T>, Receiver<T>) 
 /// Returns a new synchronous multi-producer, single consumer channel with
 /// the provided [recycling policy].
 ///
+/// # Panics
+///
+/// Panics if the capacity exceeds `usize::MAX & !(1 << (usize::BITS - 1))`. This value represents
+/// the highest power of two that can be expressed by a `usize`, excluding the most significant bit.
+///
 /// [recycling policy]: crate::recycling::Recycle
 #[must_use]
 pub fn with_recycle<T, R: Recycle<T>>(
@@ -39,6 +39,7 @@ pub fn with_recycle<T, R: Recycle<T>>(
     recycle: R,
 ) -> (Sender<T, R>, Receiver<T, R>) {
     assert!(capacity > 0);
+    assert!(capacity <= MAX_CAPACITY);
     let inner = Arc::new(Inner {
         core: ChannelCore::new(capacity),
         slots: Slot::make_boxed_array(capacity),

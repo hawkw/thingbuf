@@ -170,6 +170,7 @@ jobs:
           - mpsc_send_recv_wrap
           - mpsc_try_send_recv
           - mpsc_try_recv_ref
+          - mpsc_test_skip_slot
           - mpsc_async::rx_close_unconsumed
           - mpsc_blocking::rx_close_unconsumed
     name: model '${{ matrix.model }}''
