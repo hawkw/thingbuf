@@ -76,6 +76,14 @@ fn mpsc_try_recv_ref() {
 #[test]
 #[cfg_attr(ci_skip_slow_models, ignore)]
 fn mpsc_test_skip_slot() {
+    // This test emulates a situation where we might need to skip a slot. The setup includes two writing
+    // threads that write elements to the channel and one reading thread that maintains a RecvRef to the
+    // third element until the end of the test, necessitating the skip:
+    // Given that the channel capacity is 2, here's the sequence of operations:
+    //   Thread 1 writes: 1, 2
+    //   Thread 2 writes: 3, 4
+    // The main thread reads from slots in this order: 0, 1, 0 (holds ref), 1, 1.
+    // As a result, the third slot is skipped during this process.
     loom::model(|| {
         let (tx, rx) = blocking::channel(2);
 

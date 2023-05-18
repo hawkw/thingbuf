@@ -107,7 +107,12 @@ struct Core {
 
 struct Slot<T> {
     value: UnsafeCell<MaybeUninit<T>>,
-    /// The most significant bit of the slot's state is set if this slot is being read from.
+    /// Each slot's state has two components: a flag indicated by the most significant bit (MSB), and the rest of the state.
+    /// The MSB is set when a reader is reading from this slot.
+    /// The rest of the state helps determine the availability of the slot for reading or writing:
+    /// - A slot is available for reading when the state (excluding the MSB) equals head + 1.
+    /// - A slot is available for writing when the state (excluding the MSB) equals tail.
+    /// At initialization, each slot's state is set to its ordinal index.
     state: AtomicUsize,
 }
 
